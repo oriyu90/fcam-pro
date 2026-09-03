@@ -1,0 +1,52 @@
+# Fcam pro — 設計概要と実装状況（v1.0.0）
+
+本ファイルは Fcam pro の設計概要と、各機能の実装状況・既知の制約をまとめた開発向けドキュメントである。
+公開用の説明は README.md、次回開発者向けの保守メモは common-rules-document リポジトリの fcam-pro.md を参照。
+
+## 1. アーキテクチャ
+
+- Kotlin 2.2 + Jetpack Compose（Material 3）+ Navigation-Compose
+- CameraX 1.5（core / camera2 / lifecycle / view / video）+ Camera2 interop（マニュアル CaptureRequest）
+- Room 2.7（撮影プロファイル。破壊的マイグレーション fallback でアップデート時クラッシュを回避）
+- ML Kit barcode（QR 検出）
+- AndroidX AppCompat の per-app locale（アプリ内言語切替）
+- LifecycleService + フォアグラウンドサービス（バックグラウンド録画）
+- compileSdk 36 / minSdk 24 / targetSdk 36。追加 API は全て SDK_INT でガード。
+- パッケージ: com.oriyu90.fcampro / applicationId 同じ / versionCode 1 / versionName 1.0.0
+
+## 2. 実装済み機能
+
+| 機能 | 実装 |
+|---|---|
+| 写真・動画撮影 | PHOTO / VIDEO タブ。MediaStore へ保存（Pictures/Movies の Fcam pro フォルダ） |
+| アスペクト比 | 4:3 / 16:9 を ResolutionSelector + AspectRatioStrategy で切替 |
+| フラッシュ | AUTO / ON / OFF |
+| セルフタイマー | 0 / 3 / 10 秒（設定で既定値変更可） |
+| フロント/リア切替 | LENS_FACING で切替、対応レンズへ自動遷移 |
+| マルチレンズ | 超広角/広角/望遠/マクロ/前面。CameraSelector の CameraFilter で実 cameraId を選択。非対応時は当該向きの既定カメラへフォールバック |
+| マニュアル制御 | ISO / シャッター速度 / フォーカス距離 / WB。各スライダーは選択カメラの CameraCharacteristics の range にクランプ。MANUAL_SENSOR 非対応カメラではマニュアルボタンを無効化 |
+| AE/AF ロック | CONTROL_AE_LOCK。マニュアル露出時は CONTROL_AE_MODE_OFF |
+| タップ AF / ピンチズーム | previewView のジェスチャ → startFocusAndMetering / setZoomRatio。ロック中は無効 |
+| プロファイル | 保存・改名・削除・再適用（Room） |
+| QR 検出 | ImageAnalysis + ML Kit。1.5 秒デバウンス。URL は「開く」、それ以外はクリップボードにコピー |
+| タイムラプス | 間隔 1/3/5/10 秒（設定）。連続 3 回失敗で自動停止。OTHERS 離脱・画面破棄で停止 |
+| バックグラウンド録画 | BackgroundCameraService（LifecycleService）。通知の STOP で停止。起動中は Activity 側カメラを unbind して排他制御 |
+| OS カメラ連携 | IMAGE_CAPTURE / VIDEO_CAPTURE / STILL_IMAGE_CAMERA を処理。EXTRA_OUTPUT があれば静止画をそのストリームへ書き込み、無ければサムネイルを data extra で返す。動画は MediaStore へ録画し content URI を結果で返す |
+| i18n | 英語（既定）/ 日本語。設定画面で「システム / 日本語 / English」を選択。初期値は端末ロケール（未対応言語は英語） |
+| 設定画面 | 言語、既定アスペクト比、既定タイマー、タイムラプス間隔、シャッター音、バックグラウンド音声、バージョン、開発者サイト等へのリンク |
+| UI | 固定ダークテーマ。エッジトゥエッジ（safeDrawing インセット）。縦画面は縦積み、横画面・幅 600dp 以上は右サイドの縦レール。キャプチャボタンに contentDescription |
+
+## 3. 既知の制約（v1.0.0）
+
+- バックグラウンド録画はプロセス生存が前提（画面オフ・アプリバックグラウンドは可）。タスク除去・プロセス終了で停止。完全デタッチの無制限録画は対象外。
+- スローモーション / パノラマは OTHERS に UI エントリのみ。実処理は未実装（将来枠）。High-Speed Capture Session / OpenCV スティッチングが必要。
+- 論理マルチカメラの背後に隠れた物理サブカメラは個別選択できない場合がある。
+- 実機カメラ挙動の QA は未実施。コンパイル・単体テスト（Robolectric）・lint・署名検証のみで判断。
+- シャッター音は MediaActionSound の再生有無のみ制御（Android の仕様上、細かな音量制御・強制音の抑止は不可）。
+
+## 4. 今後の候補
+
+- スローモーション（Camera2 高速キャプチャ）とパノラマ（ネイティブ画像合成）の実装
+- 実機マトリクス（各社フラッグシップ、折りたたみ、タブレット）での QA と Roborazzi スクリーンショット回帰
+- Play Store 配信に向けた R8/リソース圧縮の有効化と ProGuard ルール検証
+- 位置情報タグ付け、RAW（DNG）保存、水準器、ヒストグラム

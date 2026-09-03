@@ -1,0 +1,127 @@
+<resources>
+    <string name="app_name">Fcam pro</string>
+
+    <!-- 権限 -->
+    <string name="perm_required_title">カメラへのアクセスが必要です</string>
+    <string name="perm_camera_rationale">Fcam pro は写真撮影と動画録画のためにカメラを使用します。マイクと通知は、動画やバックグラウンド録画を使うときにのみ要求します。</string>
+    <string name="perm_grant">権限を許可</string>
+    <string name="perm_open_settings">設定を開く</string>
+    <string name="perm_audio_denied_muted">マイクの権限が拒否されました。音声なしで録画します。</string>
+
+    <!-- 上部バー（読み上げ用） -->
+    <string name="cd_manual_mode">マニュアルモード</string>
+    <string name="cd_flash_mode">フラッシュ</string>
+    <string name="cd_timer">セルフタイマー</string>
+    <string name="cd_aspect_ratio">アスペクト比</string>
+    <string name="cd_ae_af_lock">AE/AF ロック</string>
+    <string name="cd_switch_camera">前面／背面カメラの切り替え</string>
+    <string name="cd_settings">設定</string>
+    <string name="cd_capture_photo">写真を撮影</string>
+    <string name="cd_start_recording">録画を開始</string>
+    <string name="cd_stop_recording">録画を停止</string>
+    <string name="cd_qr_detected">QR コードを検出しました</string>
+    <string name="cd_zoom">ズーム</string>
+
+    <!-- マニュアル操作 -->
+    <string name="label_iso">ISO</string>
+    <string name="label_shutter">速度</string>
+    <string name="label_focus">フォーカス</string>
+    <string name="label_wb">WB</string>
+    <string name="label_shutter_volume">シャッター音量</string>
+    <string name="label_mic">マイク</string>
+    <string name="value_auto">オート</string>
+    <string name="mic_mono">モノラル</string>
+    <string name="mic_stereo">ステレオ</string>
+    <string name="manual_unsupported">このレンズはマニュアル制御に対応していません。</string>
+
+    <!-- プロファイル -->
+    <string name="save_profile">プロファイルを保存</string>
+    <string name="profile_name">プロファイル名</string>
+    <string name="action_save">保存</string>
+    <string name="action_cancel">キャンセル</string>
+    <string name="action_update">更新</string>
+    <string name="action_edit">編集</string>
+    <string name="action_delete">削除</string>
+    <string name="edit_profile_title">プロファイル名を編集</string>
+    <string name="profile_saved">プロファイルを保存しました</string>
+    <string name="profile_unnamed">名称未設定</string>
+
+    <!-- モードタブ -->
+    <string name="tab_photo">写真</string>
+    <string name="tab_video">動画</string>
+    <string name="tab_others">その他</string>
+
+    <!-- その他メニュー -->
+    <string name="others_timelapse">タイムラプス</string>
+    <string name="others_timelapse_stop">停止</string>
+    <string name="others_slowmo">スローモーション</string>
+    <string name="others_panorama">パノラマ</string>
+    <string name="others_bg_record">背面録画</string>
+    <string name="others_bg_record_stop">背面停止</string>
+    <string name="others_settings">設定</string>
+
+    <!-- スナックバー／状態 -->
+    <string name="snack_photo_saved">写真をギャラリーに保存しました</string>
+    <string name="snack_photo_failed">写真を保存できませんでした: %1$s</string>
+    <string name="snack_video_saved">動画をギャラリーに保存しました</string>
+    <string name="snack_video_failed">録画に失敗しました: %1$s</string>
+    <string name="snack_timelapse_started">タイムラプスを開始しました（%1$d 秒ごとに 1 枚）</string>
+    <string name="snack_timelapse_stopped">タイムラプスを停止しました</string>
+    <string name="snack_timelapse_autostopped">エラーが続いたためタイムラプスを停止しました</string>
+    <string name="snack_camera_setup_failed">カメラの初期化に失敗しました: %1$s</string>
+    <string name="snack_camera_unavailable">この端末ではカメラを使用できません</string>
+    <string name="snack_bg_record_started">バックグラウンド録画を開始しました</string>
+    <string name="snack_bg_record_stopped">バックグラウンド録画を停止しました</string>
+    <string name="snack_bg_record_unsupported">この端末はバックグラウンド録画に対応していません</string>
+    <string name="snack_qr_copied">QR の内容をクリップボードにコピーしました</string>
+    <string name="snack_slowmo_unsupported">このバージョンではスローモーション撮影を利用できません</string>
+    <string name="snack_panorama_unsupported">このバージョンではパノラマ撮影を利用できません</string>
+    <string name="snack_lens_switch_failed">そのレンズに切り替えできませんでした</string>
+
+    <!-- レンズ名 -->
+    <string name="lens_wide">広角</string>
+    <string name="lens_ultrawide">超広角</string>
+    <string name="lens_telephoto">望遠</string>
+    <string name="lens_macro">マクロ</string>
+    <string name="lens_front">前面</string>
+
+    <!-- QR -->
+    <string name="qr_open">開く</string>
+    <string name="qr_copy">コピー</string>
+    <string name="qr_dismiss">閉じる</string>
+
+    <!-- 設定画面 -->
+    <string name="settings_title">設定</string>
+    <string name="action_back">戻る</string>
+    <string name="settings_section_language">言語</string>
+    <string name="settings_language">アプリの言語</string>
+    <string name="lang_system">端末の設定に従う</string>
+    <string name="lang_ja">日本語</string>
+    <string name="lang_en">English</string>
+    <string name="settings_section_capture">撮影の既定値</string>
+    <string name="settings_default_aspect">既定のアスペクト比</string>
+    <string name="aspect_4_3">4:3</string>
+    <string name="aspect_16_9">16:9</string>
+    <string name="settings_default_timer">既定のセルフタイマー</string>
+    <string name="timer_off">オフ</string>
+    <string name="timer_seconds">%1$d 秒</string>
+    <string name="settings_timelapse_interval">タイムラプスの間隔</string>
+    <string name="settings_shutter_sound">シャッター音</string>
+    <string name="settings_bg_audio">バックグラウンド録画で音声を記録する</string>
+    <string name="settings_section_about">このアプリについて</string>
+    <string name="settings_version">バージョン</string>
+    <string name="settings_licenses">オープンソースライセンス</string>
+    <string name="settings_developer_site">開発者サイト</string>
+    <string name="settings_project_home">Fcam pro ホームページ</string>
+    <string name="settings_source_code">ソースコード（GitHub）</string>
+    <string name="settings_open_external_hint">ブラウザで開きます</string>
+    <string name="licenses_title">オープンソースライセンス</string>
+
+    <!-- バックグラウンドサービスの通知 -->
+    <string name="notif_channel_name">バックグラウンド録画</string>
+    <string name="notif_channel_desc">Fcam pro がバックグラウンドで録画している間に表示されます</string>
+    <string name="notif_recording_title">Fcam pro</string>
+    <string name="notif_recording_text">バックグラウンドで録画しています</string>
+    <string name="notif_starting_text">バックグラウンド録画を開始しています…</string>
+    <string name="notif_stop">停止</string>
+</resources>
