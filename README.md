@@ -80,7 +80,7 @@ app/src/main/java/com/oriyu90/fcampro/
     └── theme/               # fixed dark Material 3 theme
 ```
 
-## Known limitations (v1.0.1)
+## Known limitations (v1.0.2)
 
 - Background recording continues while the process is alive (screen off / app
   backgrounded). Fully detached indefinite recording is out of scope.

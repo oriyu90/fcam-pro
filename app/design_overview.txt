@@ -1,4 +1,19 @@
-# Fcam pro — 設計概要と実装状況（v1.0.1）
+# Fcam pro — 設計概要と実装状況（v1.0.2）
+
+## v1.0.2 の変更点（安定性・確実性・ドライバ認識・メモリ安全性・UI 完全性の精査）
+- **ドライバ認識 / ANR**: カメラ列挙 `detectLenses` をメインスレッドから `Dispatchers.Default` へ。ViewModel 生成時に camera HAL 初期化でメインスレッドが止まらない。`noCameraAvailable` を `StateFlow` 化し、検出完了時に UI へ反映。
+- **UI 完全性 / 安定性**: 画面回転で Activity を再生成しない（`android:configChanges`）。プレビュー中断・ローカル状態喪失・黒画面フラッシュを防止。回転時の写真/動画の向きは `DisplayManager.DisplayListener` で `imageCapture/videoCapture.targetRotation` を更新して維持。
+- **メモリ安全性**: 写真↔動画モード切替時に旧 `ImageCapture` 参照を null 化、`ImageAnalysis` と ML Kit `BarcodeScanner` を確実に `release()`。QR 解析は専用の単一スレッド `Executor` で実行し、画面破棄時に `shutdown()`。
+- **動作の確実性**: ピンチズーム上限を CameraX の `cameraInfo.zoomState.maxZoomRatio` から取得（Camera2 のデジタルズーム最大値ではない）。ズーム比 1.0 のパンジェスチャは無視。
+- セルフタイマー中にシャッターを再タップでカウントダウンをキャンセル可能。タイマー `Job` は画面破棄時にキャンセル。
+- フォーカスレティクルを `onSizeChanged` で得たプレビュー領域内にクランプ（端タップで枠がはみ出さない）。
+- ギャラリーボタンの「最後の撮影」を ViewModel 保持 → 設定往復後も維持。外部 `ACTION_IMAGE_CAPTURE`（`EXTRA_OUTPUT` なし）の返却サムネイルを 1024px 以下へダウンサンプル（`TransactionTooLargeException` 回避）。
+- `MainActivity.onNewIntent` 対応 — 起動中に他アプリから `IMAGE_CAPTURE`/`VIDEO_CAPTURE` が来ても取りこぼさない。
+- `BackgroundCameraService`: `onCreate` で `running` フラグをリセット（前インスタンス異常終了からの復帰）、`onDestroy` で保留中の Handler コールバックを除去。
+- versionCode 3 / versionName 1.0.2。
+
+---
+
 
 ## v1.0.1 の変更点
 - 撮影パネルにギャラリーボタンを追加（最後に撮った写真/動画、無ければ標準ギャラリーを開く）

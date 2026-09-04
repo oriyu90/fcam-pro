@@ -113,6 +113,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
@@ -149,6 +150,8 @@ fun CameraScreen(
     val availableLenses by viewModel.availableLenses.collectAsState()
     val profiles by viewModel.profiles.collectAsState()
     val bgRunning by BackgroundCameraService.running.collectAsState()
+    val noCameraAvailable by viewModel.noCameraAvailable.collectAsState()
+    val lastMedia by viewModel.lastMedia.collectAsState()
 
     val previewView = remember {
         PreviewView(context).apply {
@@ -169,15 +172,16 @@ fun CameraScreen(
     var isCapturing by remember { mutableStateOf(false) }
 
     val appSnapshot by appSettings.state.collectAsState()
-    var lastMediaUri by remember { mutableStateOf<Uri?>(null) }
-    var lastMediaIsVideo by remember { mutableStateOf(false) }
     var focusPoint by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
     var focusLocked by remember { mutableStateOf(false) }
+    var previewSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
     val density = androidx.compose.ui.platform.LocalDensity.current
 
     val mediaActionSound = remember { MediaActionSound() }
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
+    val analysisExecutor = remember { java.util.concurrent.Executors.newSingleThreadExecutor() }
+    var timerJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     var showFlash by remember { mutableStateOf(false) }
     val flashAlpha by
@@ -206,18 +210,20 @@ fun CameraScreen(
         mediaActionSound.load(MediaActionSound.STOP_VIDEO_RECORDING)
         onDispose {
             timelapseActive = false
+            timerJob?.cancel()
             runCatching { recording?.stop() }
             qrAnalyzer?.release()
             mediaActionSound.release()
+            runCatching { analysisExecutor.shutdown() }
         }
+    }
+
+    LaunchedEffect(noCameraAvailable) {
+        if (noCameraAvailable) msg(R.string.snack_camera_unavailable)
     }
 
     // --- Acquire provider ------------------------------------------------
     LaunchedEffect(Unit) {
-        if (viewModel.noCameraAvailable) {
-            msg(R.string.snack_camera_unavailable)
-            return@LaunchedEffect
-        }
         cameraProvider =
             runCatching {
                     suspendCoroutine<ProcessCameraProvider> { cont ->
@@ -291,6 +297,11 @@ fun CameraScreen(
         try {
             camera =
                 if (settings.cameraMode == CameraMode.VIDEO) {
+                    // Tear down photo-mode use cases so the ML Kit scanner and the stale
+                    // ImageCapture reference are not retained while recording.
+                    qrAnalyzer?.release()
+                    qrAnalyzer = null
+                    imageCapture = null
                     val recorder =
                         Recorder.Builder()
                             .setQualitySelector(
@@ -299,9 +310,11 @@ fun CameraScreen(
                                 )
                             )
                             .build()
-                    videoCapture = VideoCapture.withOutput(recorder)
-                    provider.bindToLifecycle(lifecycleOwner, selector, preview, videoCapture)
+                    val vc = VideoCapture.withOutput(recorder)
+                    videoCapture = vc
+                    provider.bindToLifecycle(lifecycleOwner, selector, preview, vc)
                 } else {
+                    videoCapture = null
                     val ic =
                         ImageCapture.Builder()
                             .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
@@ -322,9 +335,7 @@ fun CameraScreen(
                         ImageAnalysis.Builder()
                             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                             .build()
-                            .also {
-                                it.setAnalyzer(ContextCompat.getMainExecutor(context), analyzer)
-                            }
+                            .also { it.setAnalyzer(analysisExecutor, analyzer) }
                     provider.bindToLifecycle(lifecycleOwner, selector, preview, ic, analysis)
                 }
         } catch (e: Exception) {
@@ -332,6 +343,26 @@ fun CameraScreen(
             camera = null
             msg(R.string.snack_camera_setup_failed, e.message ?: "")
         }
+    }
+
+    // Keep still/video output orientation correct while the Activity is not recreated
+    // on rotation (android:configChanges).
+    DisposableEffect(Unit) {
+        val dm = context.getSystemService(android.hardware.display.DisplayManager::class.java)
+        val listener =
+            object : android.hardware.display.DisplayManager.DisplayListener {
+                override fun onDisplayAdded(displayId: Int) {}
+
+                override fun onDisplayRemoved(displayId: Int) {}
+
+                override fun onDisplayChanged(displayId: Int) {
+                    val rotation = previewView.display?.rotation ?: return
+                    imageCapture?.targetRotation = rotation
+                    videoCapture?.targetRotation = rotation
+                }
+            }
+        dm?.registerDisplayListener(listener, android.os.Handler(android.os.Looper.getMainLooper()))
+        onDispose { dm?.unregisterDisplayListener(listener) }
     }
 
     // --- Manual controls -> Camera2 -----------------------------------
@@ -437,10 +468,7 @@ fun CameraScreen(
                 object : ImageCapture.OnImageSavedCallback {
                     override fun onImageSaved(r: ImageCapture.OutputFileResults) {
                         consecutiveErrors = 0
-                        r.savedUri?.let {
-                            lastMediaUri = it
-                            lastMediaIsVideo = false
-                        }
+                        r.savedUri?.let { viewModel.setLastMedia(it, isVideo = false) }
                     }
 
                     override fun onError(e: ImageCaptureException) {
@@ -464,12 +492,22 @@ fun CameraScreen(
 
     fun capturePhoto() {
         val ic = imageCapture ?: return
-        if (isCapturing) return
+        // Second tap during the self-timer countdown cancels it.
+        if (isCapturing) {
+            if (timerJob?.isActive == true) {
+                timerJob?.cancel()
+                timerJob = null
+                isCapturing = false
+            }
+            return
+        }
         isCapturing = true
-        scope.launch {
+        timerJob =
+            scope.launch {
             if (settings.timerSeconds > 0 && external == null) {
                 kotlinx.coroutines.delay(settings.timerSeconds * 1000L)
             }
+            timerJob = null
             playShutter()
             showFlash = true
 
@@ -498,10 +536,7 @@ fun CameraScreen(
                 object : ImageCapture.OnImageSavedCallback {
                     override fun onImageSaved(r: ImageCapture.OutputFileResults) {
                         isCapturing = false
-                        r.savedUri?.let {
-                            lastMediaUri = it
-                            lastMediaIsVideo = false
-                        }
+                        r.savedUri?.let { viewModel.setLastMedia(it, isVideo = false) }
                         msg(R.string.snack_photo_saved)
                     }
 
@@ -568,8 +603,7 @@ fun CameraScreen(
                             if (external != null) {
                                 onExternalResult(ok, Intent().setData(uri))
                             } else if (ok) {
-                                lastMediaUri = uri
-                                lastMediaIsVideo = true
+                                if (uri != null) viewModel.setLastMedia(uri, isVideo = true)
                                 msg(R.string.snack_video_saved)
                             } else {
                                 msg(R.string.snack_video_failed, event.error.toString())
@@ -584,11 +618,12 @@ fun CameraScreen(
     }
 
     fun openGallery() {
-        val uri = lastMediaUri
+        val lm = lastMedia
+        val uri = lm?.uri
         val viewIntent =
-            if (uri != null) {
+            if (lm != null) {
                 Intent(Intent.ACTION_VIEW)
-                    .setDataAndType(uri, if (lastMediaIsVideo) "video/*" else "image/*")
+                    .setDataAndType(lm.uri, if (lm.isVideo) "video/*" else "image/*")
                     .addFlags(
                         Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
                     )
@@ -655,14 +690,18 @@ fun CameraScreen(
                 factory = { previewView },
                 modifier =
                     Modifier.fillMaxSize()
+                        .onSizeChanged { previewSize = it }
                         .pointerInput(camera, settings.isManualMode, settings.focusDistance, focusLocked) {
                             detectTapGestures { offset -> onPreviewTap(offset) }
                         }
                         .pointerInput(camera) {
                             detectTransformGestures { _, _, zoom, _ ->
+                                if (zoom == 1f) return@detectTransformGestures
                                 val cam = camera ?: return@detectTransformGestures
                                 val max =
-                                    settings.currentLens?.capabilities?.maxZoomRatio ?: 1f
+                                    cam.cameraInfo.zoomState.value?.maxZoomRatio
+                                        ?: settings.currentLens?.capabilities?.maxZoomRatio
+                                        ?: 1f
                                 zoomRatio = (zoomRatio * zoom).coerceIn(1f, maxOf(1f, max))
                                 runCatching { cam.cameraControl.setZoomRatio(zoomRatio) }
                             }
@@ -674,7 +713,7 @@ fun CameraScreen(
             }
 
             if (appSnapshot.gridLines) {
-                androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                Canvas(Modifier.fillMaxSize()) {
                     val stroke = 1.dp.toPx()
                     val c = Color.White.copy(alpha = 0.32f)
                     for (i in 1..2) {
@@ -687,14 +726,17 @@ fun CameraScreen(
             }
 
             focusPoint?.let { fp ->
-                val half = 34.dp
+                val halfPx = with(density) { 34.dp.toPx() }
+                val w = previewSize.width.toFloat().coerceAtLeast(1f)
+                val h = previewSize.height.toFloat().coerceAtLeast(1f)
+                val cx = fp.x.coerceIn(halfPx, (w - halfPx).coerceAtLeast(halfPx))
+                val cy = fp.y.coerceIn(halfPx, (h - halfPx).coerceAtLeast(halfPx))
+                val leftDp = with(density) { (cx - halfPx).toDp() }
+                val topDp = with(density) { (cy - halfPx).toDp() }
                 Box(
                     modifier =
-                        Modifier.offset(
-                                x = with(density) { fp.x.toDp() } - half,
-                                y = with(density) { fp.y.toDp() } - half,
-                            )
-                            .size(half * 2)
+                        Modifier.offset(x = leftDp, y = topDp)
+                            .size(68.dp)
                             .border(
                                 1.5.dp,
                                 if (focusLocked) MaterialTheme.colorScheme.primary else Color.White,
@@ -706,11 +748,7 @@ fun CameraScreen(
                         text = stringResource(R.string.af_locked),
                         color = MaterialTheme.colorScheme.primary,
                         style = MaterialTheme.typography.labelSmall,
-                        modifier =
-                            Modifier.offset(
-                                x = with(density) { fp.x.toDp() } - half,
-                                y = with(density) { fp.y.toDp() } + half + 2.dp,
-                            ),
+                        modifier = Modifier.offset(x = leftDp, y = topDp + 70.dp),
                     )
                 }
             }
@@ -765,7 +803,7 @@ fun CameraScreen(
                 isCapturing = isCapturing,
                 isRecording = recording != null,
                 gridOn = appSnapshot.gridLines,
-                hasMedia = lastMediaUri != null,
+                hasMedia = lastMedia != null,
                 onToggleGrid = { appSettings.gridLines = !appSettings.gridLines },
                 onOpenGallery = ::openGallery,
                 onCapturePhoto = ::capturePhoto,
@@ -788,7 +826,7 @@ fun CameraScreen(
                     if (bgRunning) {
                         BackgroundCameraService.stop(context)
                         msg(R.string.snack_bg_record_stopped)
-                    } else if (viewModel.noCameraAvailable) {
+                    } else if (noCameraAvailable) {
                         msg(R.string.snack_bg_record_unsupported)
                     } else if (
                         ContextCompat.checkSelfPermission(
@@ -852,10 +890,27 @@ private fun captureForExternal(
                                 val buffer = image.planes[0].buffer
                                 val bytes = ByteArray(buffer.remaining())
                                 buffer.get(bytes)
+                                // ACTION_IMAGE_CAPTURE without EXTRA_OUTPUT expects a small
+                                // thumbnail in the result; a full-size bitmap overflows the
+                                // Binder transaction limit and fails the caller.
+                                val opt =
+                                    android.graphics.BitmapFactory.Options().apply {
+                                        inJustDecodeBounds = true
+                                    }
+                                android.graphics.BitmapFactory.decodeByteArray(
+                                    bytes, 0, bytes.size, opt
+                                )
+                                var sample = 1
+                                while (
+                                    opt.outWidth / sample > 1024 || opt.outHeight / sample > 1024
+                                ) sample *= 2
                                 android.graphics.BitmapFactory.decodeByteArray(
                                     bytes,
                                     0,
                                     bytes.size,
+                                    android.graphics.BitmapFactory.Options().apply {
+                                        inSampleSize = sample
+                                    },
                                 )
                             }
                             .getOrNull()

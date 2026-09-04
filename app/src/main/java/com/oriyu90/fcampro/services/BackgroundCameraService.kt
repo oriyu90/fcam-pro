@@ -61,6 +61,9 @@ class BackgroundCameraService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
+        // A fresh service instance is not recording yet. This also clears a stale
+        // "running" flag if a previous instance was killed without onDestroy.
+        _running.value = false
         createChannel()
         startForegroundSafely(getString(R.string.notif_starting_text))
     }
@@ -240,6 +243,7 @@ class BackgroundCameraService : LifecycleService() {
 
     override fun onDestroy() {
         _running.value = false
+        main.removeCallbacksAndMessages(null)
         tickerJob?.cancel()
         runCatching { recording?.stop() }
         recording = null

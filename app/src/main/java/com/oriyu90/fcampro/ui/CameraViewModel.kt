@@ -5,6 +5,7 @@ import android.content.Context
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraMetadata
+import android.net.Uri
 import android.util.Log
 import android.util.Range
 import androidx.camera.core.AspectRatio
@@ -15,6 +16,7 @@ import com.oriyu90.fcampro.core.AppSettings
 import com.oriyu90.fcampro.data.AppDatabase
 import com.oriyu90.fcampro.data.CameraProfile
 import com.oriyu90.fcampro.data.ProfileRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -80,13 +82,26 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val _availableLenses = MutableStateFlow<List<CameraLensInfo>>(emptyList())
     val availableLenses: StateFlow<List<CameraLensInfo>> = _availableLenses.asStateFlow()
 
-    /** True when the device exposed no usable camera. UI shows a terminal message. */
-    var noCameraAvailable: Boolean = false
-        private set
+    /** True once lens detection has finished and found no usable camera. */
+    private val _noCameraAvailable = MutableStateFlow(false)
+    val noCameraAvailable: StateFlow<Boolean> = _noCameraAvailable.asStateFlow()
+
+    /** Most recent saved capture, kept here so the "open gallery" button survives
+     *  navigation to Settings and back. */
+    data class LastMedia(val uri: Uri, val isVideo: Boolean)
+
+    private val _lastMedia = MutableStateFlow<LastMedia?>(null)
+    val lastMedia: StateFlow<LastMedia?> = _lastMedia.asStateFlow()
 
     init {
-        detectLenses(application)
         applyDefaultsFromSettings()
+        // Enumerating cameras can touch the camera HAL on first use; keep it off the
+        // main thread so ViewModel creation never stalls Activity start.
+        viewModelScope.launch(Dispatchers.Default) { detectLenses(application) }
+    }
+
+    fun setLastMedia(uri: Uri, isVideo: Boolean) {
+        _lastMedia.value = LastMedia(uri, isVideo)
     }
 
     private fun applyDefaultsFromSettings() {
@@ -102,7 +117,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private fun detectLenses(context: Context) {
         val manager = context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager
         if (manager == null) {
-            noCameraAvailable = true
+            _noCameraAvailable.value = true
             return
         }
         val lenses = mutableListOf<CameraLensInfo>()
@@ -179,7 +194,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val sorted =
             lenses.sortedWith(compareBy({ it.isFront }, { it.type.ordinal }, { it.focalLength }))
         _availableLenses.value = sorted
-        noCameraAvailable = sorted.isEmpty()
+        _noCameraAvailable.value = sorted.isEmpty()
 
         val defaultBack =
             sorted.firstOrNull { !it.isFront && it.type == CameraLensType.WIDE }

@@ -25,6 +25,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -47,15 +51,17 @@ import com.oriyu90.fcampro.ui.theme.FcamProTheme
 class MainActivity : AppCompatActivity() {
 
     private val viewModel: CameraViewModel by viewModels()
+    private val externalSpec = mutableStateOf<ExternalCaptureSpec?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val external = parseExternalCapture(intent)
+        externalSpec.value = parseExternalCapture(intent)
 
         setContent {
             FcamProTheme {
+                val external by externalSpec
                 CameraGate(
                     external = external,
                     onExternalResult = { ok, data ->
@@ -66,6 +72,13 @@ class MainActivity : AppCompatActivity() {
                 )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val spec = parseExternalCapture(intent)
+        if (spec != null) externalSpec.value = spec
     }
 
     private fun parseExternalCapture(intent: Intent?): ExternalCaptureSpec? {

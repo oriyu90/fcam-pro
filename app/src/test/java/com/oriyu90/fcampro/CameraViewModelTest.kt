@@ -119,4 +119,16 @@ class CameraViewModelTest {
         vm.setShutterVolume(-3f)
         assertEquals(0f, vm.settings.value.shutterVolume)
     }
+
+    @Test
+    fun lastMediaStartsNullAndUpdates() {
+        val vm = vm()
+        assertEquals(null, vm.lastMedia.value)
+        val uri = android.net.Uri.parse("content://media/external/images/media/42")
+        vm.setLastMedia(uri, isVideo = false)
+        assertEquals(uri, vm.lastMedia.value?.uri)
+        assertEquals(false, vm.lastMedia.value?.isVideo)
+        vm.setLastMedia(uri, isVideo = true)
+        assertEquals(true, vm.lastMedia.value?.isVideo)
+    }
 }
