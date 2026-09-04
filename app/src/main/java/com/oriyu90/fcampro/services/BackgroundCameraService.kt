@@ -277,6 +277,12 @@ class BackgroundCameraService : LifecycleService() {
             .setContentTitle(getString(R.string.notif_recording_title))
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
+            .setLargeIcon(
+                runCatching {
+                        android.graphics.BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher)
+                    }
+                    .getOrNull()
+            )
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(
