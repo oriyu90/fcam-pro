@@ -214,7 +214,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // --- Mode / simple toggles -------------------------------------------------
 
     fun setMode(mode: CameraMode) {
-        _settings.value = _settings.value.copy(cameraMode = mode)
+        _settings.value =
+            _settings.value.copy(
+                cameraMode = mode,
+                // Manual controls only make sense in PHOTO / VIDEO; collapse the panel
+                // when leaving them so OTHERS never shows a stale manual panel.
+                isManualMode = if (mode == CameraMode.OTHERS) false else _settings.value.isManualMode,
+            )
     }
 
     fun toggleFrontCamera() {

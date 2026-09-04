@@ -22,6 +22,8 @@ class AppSettings private constructor(private val prefs: SharedPreferences) {
         val shutterSound: Boolean,
         val backgroundAudio: Boolean,
         val gridLines: Boolean,
+        val panelCollapsed: Boolean,
+        val panelGravity: Int, // 0 = top, 1 = center, 2 = bottom
     )
 
     private val _state = MutableStateFlow(readSnapshot())
@@ -37,6 +39,8 @@ class AppSettings private constructor(private val prefs: SharedPreferences) {
             shutterSound = prefs.getBoolean(KEY_SHUTTER_SOUND, true),
             backgroundAudio = prefs.getBoolean(KEY_BG_AUDIO, true),
             gridLines = prefs.getBoolean(KEY_GRID, false),
+            panelCollapsed = prefs.getBoolean(KEY_PANEL_COLLAPSED, false),
+            panelGravity = prefs.getInt(KEY_PANEL_GRAVITY, 2).coerceIn(0, 2),
         )
 
     private fun mutate(block: SharedPreferences.Editor.() -> Unit) {
@@ -73,6 +77,14 @@ class AppSettings private constructor(private val prefs: SharedPreferences) {
         get() = _state.value.gridLines
         set(value) = mutate { putBoolean(KEY_GRID, value) }
 
+    var panelCollapsed: Boolean
+        get() = _state.value.panelCollapsed
+        set(value) = mutate { putBoolean(KEY_PANEL_COLLAPSED, value) }
+
+    var panelGravity: Int
+        get() = _state.value.panelGravity
+        set(value) = mutate { putInt(KEY_PANEL_GRAVITY, value.coerceIn(0, 2)) }
+
     companion object {
         val TIMELAPSE_INTERVALS = listOf(1, 3, 5, 10)
         val TIMER_OPTIONS = listOf(0, 3, 10)
@@ -85,6 +97,8 @@ class AppSettings private constructor(private val prefs: SharedPreferences) {
         private const val KEY_SHUTTER_SOUND = "shutter_sound"
         private const val KEY_BG_AUDIO = "background_audio"
         private const val KEY_GRID = "grid_lines"
+        private const val KEY_PANEL_COLLAPSED = "panel_collapsed"
+        private const val KEY_PANEL_GRAVITY = "panel_gravity"
 
         @Volatile private var instance: AppSettings? = null
 

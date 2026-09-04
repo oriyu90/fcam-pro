@@ -23,8 +23,17 @@
     <string name="cd_zoom">Zoom</string>
     <string name="cd_grid">Grid lines</string>
     <string name="cd_gallery">View captured photos and videos</string>
+    <string name="cd_latest_capture">Open the latest photo or video</string>
     <string name="cd_lens">Select lens</string>
     <string name="af_locked">AF locked</string>
+    <string name="cd_panel_open">Open the control panel</string>
+    <string name="cd_panel_close">Collapse the control panel</string>
+    <string name="cd_panel_position">Panel position</string>
+    <string name="panel_pos_top">Top</string>
+    <string name="panel_pos_center">Center</string>
+    <string name="panel_pos_bottom">Bottom</string>
+    <string name="cd_battery">Battery level</string>
+    <string name="cd_move_controls">Drag to move the controls</string>
 
     <!-- Manual controls -->
     <string name="label_iso">ISO</string>

@@ -23,8 +23,17 @@
     <string name="cd_zoom">ズーム</string>
     <string name="cd_grid">グリッド線</string>
     <string name="cd_gallery">撮影した写真・動画を見る</string>
+    <string name="cd_latest_capture">最新の写真・動画を開く</string>
     <string name="cd_lens">レンズを選択</string>
     <string name="af_locked">AF ロック中</string>
+    <string name="cd_panel_open">操作パネルを開く</string>
+    <string name="cd_panel_close">操作パネルを閉じる</string>
+    <string name="cd_panel_position">パネルの位置</string>
+    <string name="panel_pos_top">上</string>
+    <string name="panel_pos_center">中央</string>
+    <string name="panel_pos_bottom">下</string>
+    <string name="cd_battery">バッテリー残量</string>
+    <string name="cd_move_controls">ドラッグで移動</string>
 
     <!-- マニュアル操作 -->
     <string name="label_iso">ISO</string>

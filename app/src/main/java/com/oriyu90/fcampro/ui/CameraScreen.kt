@@ -111,6 +111,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -172,6 +173,8 @@ fun CameraScreen(
     var isCapturing by remember { mutableStateOf(false) }
 
     val appSnapshot by appSettings.state.collectAsState()
+    var batteryPct by remember { mutableStateOf<Int?>(null) }
+    var thumb by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     var focusPoint by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
     var focusLocked by remember { mutableStateOf(false) }
     var previewSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
@@ -220,6 +223,62 @@ fun CameraScreen(
 
     LaunchedEffect(noCameraAvailable) {
         if (noCameraAvailable) msg(R.string.snack_camera_unavailable)
+    }
+
+    // --- Battery level (for the collapsed control cluster) --------------
+    DisposableEffect(Unit) {
+        fun read(i: Intent?) {
+            val lvl = i?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
+            val scale = i?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1) ?: -1
+            batteryPct = if (lvl >= 0 && scale > 0) (lvl * 100 / scale) else null
+        }
+        val receiver =
+            object : android.content.BroadcastReceiver() {
+                override fun onReceive(c: android.content.Context?, i: Intent?) = read(i)
+            }
+        val sticky =
+            androidx.core.content.ContextCompat.registerReceiver(
+                context,
+                receiver,
+                android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
+        read(sticky)
+        onDispose { runCatching { context.unregisterReceiver(receiver) } }
+    }
+
+    // --- Latest-capture thumbnail -------------------------------------
+    LaunchedEffect(lastMedia) {
+        val lm = lastMedia
+        if (lm == null) {
+            thumb = null
+            return@LaunchedEffect
+        }
+        thumb =
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                        val bmp =
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                context.contentResolver.loadThumbnail(
+                                    lm.uri,
+                                    android.util.Size(160, 160),
+                                    null,
+                                )
+                            } else {
+                                context.contentResolver.openInputStream(lm.uri)?.use { ins ->
+                                    android.graphics.BitmapFactory.decodeStream(
+                                        ins,
+                                        null,
+                                        android.graphics.BitmapFactory.Options().apply {
+                                            inSampleSize = 8
+                                        },
+                                    )
+                                }
+                            }
+                        bmp?.asImageBitmap()
+                    }
+                    .getOrNull()
+            }
     }
 
     // --- Acquire provider ------------------------------------------------
@@ -803,7 +862,13 @@ fun CameraScreen(
                 isCapturing = isCapturing,
                 isRecording = recording != null,
                 gridOn = appSnapshot.gridLines,
+                mediaThumb = thumb,
                 hasMedia = lastMedia != null,
+                batteryPct = batteryPct,
+                panelCollapsed = appSnapshot.panelCollapsed,
+                panelGravity = appSnapshot.panelGravity,
+                onSetPanelCollapsed = { appSettings.panelCollapsed = it },
+                onSetPanelGravity = { appSettings.panelGravity = it },
                 onToggleGrid = { appSettings.gridLines = !appSettings.gridLines },
                 onOpenGallery = ::openGallery,
                 onCapturePhoto = ::capturePhoto,

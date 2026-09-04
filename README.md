@@ -17,7 +17,8 @@ localized Japanese / English interface.
 |---|---|
 | Capture | Photo & video, 4:3 / 16:9, self-timer (0/3/10 s), flash auto/on/off, rule-of-thirds grid, tap to lock / unlock focus, pinch-to-zoom, one-tap jump to the system gallery |
 | Manual controls | ISO, shutter speed, focus distance and white balance — every slider is clamped to the ranges the selected physical camera actually reports, and each one (or all at once) can be set back to Auto |
-| Lenses | Ultra-wide / wide / tele / macro / front — the app binds the real `cameraId`, not just a lens-facing flag; a compact pop-up switcher is available in photo and video mode |
+| Lenses | Ultra-wide / wide / tele / macro / front — binds the real `cameraId`; an always-visible switcher row in photo and video mode |
+| Adaptive UI | Phone-portrait keeps the compact stacked layout; ≥600 dp portrait shows a floating left panel with two-column icons, vertical mode tabs and top/center/bottom alignment; landscape shows a right side-rail. The panel collapses to a draggable shutter + battery + "expand" cluster |
 | Profiles | Save, rename, delete and re-apply manual setups (Room database, survives reinstall-safe destructive migration) |
 | OTHERS | Time-lapse (configurable 1–10 s interval, auto-stop on repeated errors), background video recording via a foreground service with an elapsed-time notification, QR detection with open / copy |
 | System integration | Registers for `IMAGE_CAPTURE` / `VIDEO_CAPTURE` / `STILL_IMAGE_CAMERA`, so it can be set as the OS default camera app and returns results to the caller |
@@ -80,11 +81,11 @@ app/src/main/java/com/oriyu90/fcampro/
     └── theme/               # fixed dark Material 3 theme
 ```
 
-## Known limitations (v1.0.2)
+## Known limitations (v2.0.0)
 
 - Background recording continues while the process is alive (screen off / app
   backgrounded). Fully detached indefinite recording is out of scope.
-- Slow-motion and panorama expose UI entry points but are not implemented in v1.
+- Slow-motion and panorama expose UI entry points but are not implemented.
 - Physical sub-cameras hidden behind a logical multi-camera cannot always be
   selected individually; the app falls back to the default camera for that facing.
 - Real-device camera behaviour has been validated by compilation, unit tests,
@@ -108,7 +109,8 @@ MIT — see [LICENSE](LICENSE). Author: **Yuki_Orita** (折田悠希 / おりた
 - 写真／動画、4:3・16:9、セルフタイマー（0/3/10 秒）、フラッシュ、三分割グリッド、タップでフォーカス固定／解除、ピンチズーム、標準ギャラリーへのワンタップ遷移
 - ISO・シャッター速度・フォーカス距離・ホワイトバランスのマニュアル制御
   （各スライダーは選択中の物理カメラが報告する範囲に自動でクランプ。各項目・一括でオートに戻せる）
-- 超広角／広角／望遠／マクロ／前面レンズを実 `cameraId` で切り替え（写真・動画モードでは小さなポップアップで選択）
+- 超広角／広角／望遠／マクロ／前面レンズを実 `cameraId` で切り替え（写真・動画モードで常時表示の選択行）
+- 画面に応じた操作パネル: スマホ縦は従来の縦積み、≥600dp 縦は左に浮くパネル（アイコン 2 列・縦タブ・上/中央/下寄せ）、横向きは右のサイドバー。パネルは開閉でき、閉じるとシャッター＋バッテリー＋展開ボタンだけの移動可能なクラスタになる
 - マニュアル設定のプロファイル保存・改名・削除・再適用（Room）
 - タイムラプス（間隔 1〜10 秒、連続エラー時に自動停止）、バックグラウンド録画、QR 検出
 - `IMAGE_CAPTURE` / `VIDEO_CAPTURE` に対応し、OS の標準カメラアプリに設定可能
