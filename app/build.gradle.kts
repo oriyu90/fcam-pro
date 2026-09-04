@@ -32,10 +32,16 @@ android {
       keyPassword = System.getenv("KEY_PASSWORD")
     }
     getByName("debug") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
+      // Use a repo-local debug keystore when present (keeps a stable debug identity
+      // across machines); otherwise fall back to the AGP-managed ~/.android/debug.keystore
+      // so CI and fresh clones build without a setup step.
+      val local = file("${rootDir}/debug.keystore")
+      if (local.exists()) {
+        storeFile = local
+        storePassword = "android"
+        keyAlias = "androiddebugkey"
+        keyPassword = "android"
+      }
     }
   }
 
