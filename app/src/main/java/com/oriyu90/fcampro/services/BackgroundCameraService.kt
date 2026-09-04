@@ -10,11 +10,17 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Log
 import androidx.annotation.RequiresPermission
+import androidx.camera.core.CameraSelector
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.video.FallbackStrategy
 import androidx.camera.video.MediaStoreOutputOptions
+import androidx.camera.video.PendingRecording
 import androidx.camera.video.Quality
 import androidx.camera.video.QualitySelector
 import androidx.camera.video.Recorder
@@ -25,9 +31,14 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
+import androidx.lifecycle.lifecycleScope
 import com.oriyu90.fcampro.MainActivity
 import com.oriyu90.fcampro.R
 import com.oriyu90.fcampro.core.AppSettings
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -35,7 +46,7 @@ import kotlinx.coroutines.flow.StateFlow
  * Headless foreground service that records video while the app is not in front.
  *
  * Scope for v1: recording continues while the process is alive (screen off, app in
- * background). It is intentionally stopped if the task is removed or the process dies —
+ * background). It is stopped cleanly if the task is removed or the process dies —
  * fully detached indefinite recording is out of scope.
  */
 class BackgroundCameraService : LifecycleService() {
@@ -43,6 +54,10 @@ class BackgroundCameraService : LifecycleService() {
     private var cameraProvider: ProcessCameraProvider? = null
     private var recording: Recording? = null
     private var stopping = false
+    private var startedAtElapsed = 0L
+    private var tickerJob: Job? = null
+    private var lensFront = false
+    private val main = Handler(Looper.getMainLooper())
 
     override fun onCreate() {
         super.onCreate()
@@ -56,8 +71,24 @@ class BackgroundCameraService : LifecycleService() {
             stopEverything()
             return START_NOT_STICKY
         }
+
+        lensFront = intent?.getBooleanExtra(EXTRA_LENS_FRONT, false) ?: false
+
+        if (
+            ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) !=
+                PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.w(TAG, "camera permission missing")
+            stopEverything()
+            return START_NOT_STICKY
+        }
+
+        // Publish running=true synchronously so the Activity's CameraScreen unbinds its
+        // own use cases first, then bind the service camera one frame later to avoid a
+        // same-process physical-camera conflict.
         if (recording == null && !stopping) {
-            startRecording()
+            _running.value = true
+            main.postDelayed({ if (!stopping) startRecording() }, 350L)
         }
         return START_NOT_STICKY
     }
@@ -70,30 +101,40 @@ class BackgroundCameraService : LifecycleService() {
                     runCatching { future.get() }.getOrNull()
                         ?: return@addListener fail("camera provider unavailable")
                 cameraProvider = provider
-                try {
-                    provider.unbindAll()
-                    val recorder =
-                        Recorder.Builder()
-                            .setQualitySelector(
-                                QualitySelector.fromOrderedList(
-                                    listOf(Quality.FHD, Quality.HD, Quality.SD)
-                                )
-                            )
-                            .build()
-                    val videoCapture = VideoCapture.withOutput(recorder)
-                    provider.bindToLifecycle(
-                        this,
-                        androidx.camera.core.CameraSelector.DEFAULT_BACK_CAMERA,
-                        videoCapture,
-                    )
-                    beginRecord(videoCapture)
-                } catch (e: Exception) {
-                    Log.e(TAG, "bind/record failed", e)
-                    fail(e.message ?: "error")
-                }
+                bindAndRecord(provider, firstAttempt = true)
             },
             ContextCompat.getMainExecutor(this),
         )
+    }
+
+    private fun bindAndRecord(provider: ProcessCameraProvider, firstAttempt: Boolean) {
+        try {
+            provider.unbindAll()
+            val recorder =
+                Recorder.Builder()
+                    .setQualitySelector(
+                        QualitySelector.fromOrderedList(
+                            listOf(Quality.FHD, Quality.HD, Quality.SD),
+                            FallbackStrategy.lowerQualityOrHigherThan(Quality.SD),
+                        )
+                    )
+                    .build()
+            val videoCapture = VideoCapture.withOutput(recorder)
+            val selector =
+                if (lensFront) CameraSelector.DEFAULT_FRONT_CAMERA
+                else CameraSelector.DEFAULT_BACK_CAMERA
+            provider.bindToLifecycle(this, selector, videoCapture)
+            beginRecord(videoCapture)
+        } catch (e: Exception) {
+            if (firstAttempt) {
+                // The Activity may not have released the camera yet; retry once.
+                Log.w(TAG, "bind failed, retrying once", e)
+                main.postDelayed({ if (!stopping) bindAndRecord(provider, firstAttempt = false) }, 400L)
+            } else {
+                Log.e(TAG, "bind failed", e)
+                fail(e.message ?: "bind error")
+            }
+        }
     }
 
     private fun beginRecord(videoCapture: VideoCapture<Recorder>) {
@@ -121,30 +162,57 @@ class BackgroundCameraService : LifecycleService() {
 
         try {
             var pending = videoCapture.output.prepareRecording(this, output)
-            if (wantAudio) {
-                pending = enableAudio(pending)
-            }
+            if (wantAudio) pending = enableAudio(pending)
             recording =
                 pending.start(ContextCompat.getMainExecutor(this)) { event ->
-                    if (event is VideoRecordEvent.Finalize) {
-                        if (event.hasError()) {
-                            Log.e(TAG, "recording finalized with error ${event.error}")
+                    when (event) {
+                        is VideoRecordEvent.Start -> {
+                            startedAtElapsed = SystemClock.elapsedRealtime()
+                            startTicker()
+                            updateNotification(getString(R.string.notif_recording_text))
                         }
-                        if (!stopping) stopEverything()
+                        is VideoRecordEvent.Finalize -> {
+                            if (event.hasError()) {
+                                Log.e(TAG, "recording finalized with error ${event.error}")
+                            }
+                            if (!stopping) stopEverything()
+                        }
+                        else -> Unit
                     }
                 }
             _running.value = true
-            updateNotification(getString(R.string.notif_recording_text))
         } catch (e: Exception) {
             Log.e(TAG, "prepareRecording failed", e)
-            fail(e.message ?: "error")
+            fail(e.message ?: "record error")
         }
     }
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
-    private fun enableAudio(
-        pending: androidx.camera.video.PendingRecording
-    ): androidx.camera.video.PendingRecording = pending.withAudioEnabled()
+    private fun enableAudio(pending: PendingRecording): PendingRecording = pending.withAudioEnabled()
+
+    private fun startTicker() {
+        tickerJob?.cancel()
+        tickerJob =
+            lifecycleScope.launch {
+                while (isActive && !stopping) {
+                    updateNotification(
+                        getString(
+                            R.string.notif_recording_elapsed,
+                            formatElapsed(SystemClock.elapsedRealtime() - startedAtElapsed),
+                        )
+                    )
+                    delay(1000L)
+                }
+            }
+    }
+
+    private fun formatElapsed(ms: Long): String {
+        val total = (ms / 1000).coerceAtLeast(0)
+        val h = total / 3600
+        val m = (total % 3600) / 60
+        val s = total % 60
+        return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
+    }
 
     private fun fail(reason: String) {
         Log.w(TAG, "background recording failed: $reason")
@@ -155,6 +223,7 @@ class BackgroundCameraService : LifecycleService() {
         if (stopping) return
         stopping = true
         _running.value = false
+        tickerJob?.cancel()
         runCatching { recording?.stop() }
         recording = null
         runCatching { cameraProvider?.unbindAll() }
@@ -163,8 +232,15 @@ class BackgroundCameraService : LifecycleService() {
         stopSelf()
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // Flush the current file cleanly instead of letting the process die mid-write.
+        stopEverything()
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
         _running.value = false
+        tickerJob?.cancel()
         runCatching { recording?.stop() }
         recording = null
         runCatching { cameraProvider?.unbindAll() }
@@ -183,13 +259,17 @@ class BackgroundCameraService : LifecycleService() {
             ServiceCompat.startForeground(this, NOTIF_ID, buildNotification(text), type)
         } catch (e: Exception) {
             Log.e(TAG, "startForeground failed", e)
+            _running.value = false
             stopSelf()
         }
     }
 
     private fun updateNotification(text: String) {
-        val nm = getSystemService(NotificationManager::class.java)
-        nm?.notify(NOTIF_ID, buildNotification(text))
+        if (stopping) return
+        runCatching {
+            getSystemService(NotificationManager::class.java)
+                ?.notify(NOTIF_ID, buildNotification(text))
+        }
     }
 
     private fun buildNotification(text: String) =
@@ -198,6 +278,7 @@ class BackgroundCameraService : LifecycleService() {
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
             .setContentIntent(
                 PendingIntent.getActivity(
                     this,
@@ -236,12 +317,15 @@ class BackgroundCameraService : LifecycleService() {
         private const val CHANNEL_ID = "fcam_background_recording"
         private const val NOTIF_ID = 4211
         const val ACTION_STOP = "com.oriyu90.fcampro.action.STOP_BG_RECORDING"
+        const val EXTRA_LENS_FRONT = "com.oriyu90.fcampro.extra.LENS_FRONT"
 
         private val _running = MutableStateFlow(false)
         val running: StateFlow<Boolean> = _running
 
-        fun start(context: Context) {
-            val intent = Intent(context, BackgroundCameraService::class.java)
+        fun start(context: Context, lensFront: Boolean = false) {
+            val intent =
+                Intent(context, BackgroundCameraService::class.java)
+                    .putExtra(EXTRA_LENS_FRONT, lensFront)
             ContextCompat.startForegroundService(context, intent)
         }
 

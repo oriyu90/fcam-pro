@@ -86,6 +86,32 @@ class CameraViewModelTest {
     }
 
     @Test
+    fun manualSettingsCanBeResetToAuto() {
+        val vm = vm()
+        vm.setLens(
+            lensWith(
+                LensCapabilities(
+                    supportsManualSensor = true,
+                    isoRange = 100..800,
+                    exposureRangeNs = 1_000_000L..100_000_000L,
+                    minFocusDistance = 5f,
+                    awbModes = listOf(1, 2),
+                    hasFlash = false,
+                    maxZoomRatio = 2f,
+                )
+            )
+        )
+        vm.updateManualSettings(iso = 400, shutterNs = 50_000_000L, focus = 2f, wb = 2)
+        vm.updateManualSettings(iso = null, shutterNs = 50_000_000L, focus = 2f, wb = 2)
+        assertEquals(null, vm.settings.value.iso)
+        assertEquals(50_000_000L, vm.settings.value.shutterSpeedNs)
+        vm.updateManualSettings(iso = null, shutterNs = null, focus = null, wb = null)
+        assertEquals(null, vm.settings.value.shutterSpeedNs)
+        assertEquals(null, vm.settings.value.focusDistance)
+        assertEquals(null, vm.settings.value.whiteBalanceMode)
+    }
+
+    @Test
     fun shutterVolumeIsClampedToUnitRange() {
         val vm = vm()
         vm.setShutterVolume(9f)

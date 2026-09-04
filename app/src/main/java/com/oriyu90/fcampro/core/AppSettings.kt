@@ -21,6 +21,7 @@ class AppSettings private constructor(private val prefs: SharedPreferences) {
         val timelapseIntervalSeconds: Int,
         val shutterSound: Boolean,
         val backgroundAudio: Boolean,
+        val gridLines: Boolean,
     )
 
     private val _state = MutableStateFlow(readSnapshot())
@@ -35,6 +36,7 @@ class AppSettings private constructor(private val prefs: SharedPreferences) {
                 prefs.getInt(KEY_TL_INTERVAL, 3).let { if (it in TIMELAPSE_INTERVALS) it else 3 },
             shutterSound = prefs.getBoolean(KEY_SHUTTER_SOUND, true),
             backgroundAudio = prefs.getBoolean(KEY_BG_AUDIO, true),
+            gridLines = prefs.getBoolean(KEY_GRID, false),
         )
 
     private fun mutate(block: SharedPreferences.Editor.() -> Unit) {
@@ -67,6 +69,10 @@ class AppSettings private constructor(private val prefs: SharedPreferences) {
         get() = _state.value.backgroundAudio
         set(value) = mutate { putBoolean(KEY_BG_AUDIO, value) }
 
+    var gridLines: Boolean
+        get() = _state.value.gridLines
+        set(value) = mutate { putBoolean(KEY_GRID, value) }
+
     companion object {
         val TIMELAPSE_INTERVALS = listOf(1, 3, 5, 10)
         val TIMER_OPTIONS = listOf(0, 3, 10)
@@ -78,6 +84,7 @@ class AppSettings private constructor(private val prefs: SharedPreferences) {
         private const val KEY_TL_INTERVAL = "timelapse_interval_seconds"
         private const val KEY_SHUTTER_SOUND = "shutter_sound"
         private const val KEY_BG_AUDIO = "background_audio"
+        private const val KEY_GRID = "grid_lines"
 
         @Volatile private var instance: AppSettings? = null
 

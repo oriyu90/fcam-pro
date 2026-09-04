@@ -32,11 +32,14 @@ import androidx.camera.video.VideoRecordEvent
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -165,6 +168,13 @@ fun CameraScreen(
     var timelapseActive by remember { mutableStateOf(false) }
     var isCapturing by remember { mutableStateOf(false) }
 
+    val appSnapshot by appSettings.state.collectAsState()
+    var lastMediaUri by remember { mutableStateOf<Uri?>(null) }
+    var lastMediaIsVideo by remember { mutableStateOf(false) }
+    var focusPoint by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
+    var focusLocked by remember { mutableStateOf(false) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+
     val mediaActionSound = remember { MediaActionSound() }
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
@@ -243,6 +253,8 @@ fun CameraScreen(
 
         runCatching { provider.unbindAll() }
         zoomRatio = 1f
+        focusLocked = false
+        focusPoint = null
 
         val resolutionSelector =
             ResolutionSelector.Builder()
@@ -425,6 +437,10 @@ fun CameraScreen(
                 object : ImageCapture.OnImageSavedCallback {
                     override fun onImageSaved(r: ImageCapture.OutputFileResults) {
                         consecutiveErrors = 0
+                        r.savedUri?.let {
+                            lastMediaUri = it
+                            lastMediaIsVideo = false
+                        }
                     }
 
                     override fun onError(e: ImageCaptureException) {
@@ -482,6 +498,10 @@ fun CameraScreen(
                 object : ImageCapture.OnImageSavedCallback {
                     override fun onImageSaved(r: ImageCapture.OutputFileResults) {
                         isCapturing = false
+                        r.savedUri?.let {
+                            lastMediaUri = it
+                            lastMediaIsVideo = false
+                        }
                         msg(R.string.snack_photo_saved)
                     }
 
@@ -544,10 +564,12 @@ fun CameraScreen(
                         if (event is VideoRecordEvent.Finalize) {
                             recording = null
                             val ok = !event.hasError()
+                            val uri = event.outputResults.outputUri
                             if (external != null) {
-                                val uri = event.outputResults.outputUri
                                 onExternalResult(ok, Intent().setData(uri))
                             } else if (ok) {
+                                lastMediaUri = uri
+                                lastMediaIsVideo = true
                                 msg(R.string.snack_video_saved)
                             } else {
                                 msg(R.string.snack_video_failed, event.error.toString())
@@ -559,6 +581,61 @@ fun CameraScreen(
                     msg(R.string.snack_video_failed, it.message ?: "")
                     null
                 }
+    }
+
+    fun openGallery() {
+        val uri = lastMediaUri
+        val viewIntent =
+            if (uri != null) {
+                Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(uri, if (lastMediaIsVideo) "video/*" else "image/*")
+                    .addFlags(
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
+                    )
+            } else {
+                Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                        "image/*",
+                    )
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        val ok = runCatching { context.startActivity(viewIntent); true }.getOrDefault(false)
+        if (!ok) {
+            val fallback =
+                Intent(Intent.ACTION_MAIN)
+                    .addCategory(Intent.CATEGORY_APP_GALLERY)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val ok2 =
+                runCatching { context.startActivity(fallback); true }.getOrDefault(false)
+            if (!ok2) msg(if (uri == null) R.string.snack_no_media else R.string.snack_open_failed)
+        }
+    }
+
+    // --- Focus lock (tap to lock, tap again to release) ---------------
+    fun onPreviewTap(offset: androidx.compose.ui.geometry.Offset) {
+        val cam = camera ?: return
+        // Manual focus distance overrides tap-to-focus.
+        if (settings.isManualMode && settings.focusDistance != null) return
+        if (focusLocked) {
+            runCatching { cam.cameraControl.cancelFocusAndMetering() }
+            focusLocked = false
+            focusPoint = null
+            return
+        }
+        val point = previewView.meteringPointFactory.createPoint(offset.x, offset.y)
+        val action =
+            FocusMeteringAction.Builder(
+                    point,
+                    FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE,
+                )
+                .disableAutoCancel()
+                .build()
+        runCatching {
+            cam.cameraControl.startFocusAndMetering(action)
+            focusPoint = offset
+            focusLocked = true
+        }
     }
 
     // --- QR overlay side effect ---------------------------------------
@@ -578,21 +655,8 @@ fun CameraScreen(
                 factory = { previewView },
                 modifier =
                     Modifier.fillMaxSize()
-                        .pointerInput(camera) {
-                            detectTapGestures { offset ->
-                                val cam = camera ?: return@detectTapGestures
-                                if (settings.aeAfLocked) return@detectTapGestures
-                                val point =
-                                    previewView.meteringPointFactory.createPoint(
-                                        offset.x,
-                                        offset.y,
-                                    )
-                                runCatching {
-                                    cam.cameraControl.startFocusAndMetering(
-                                        FocusMeteringAction.Builder(point).build()
-                                    )
-                                }
-                            }
+                        .pointerInput(camera, settings.isManualMode, settings.focusDistance, focusLocked) {
+                            detectTapGestures { offset -> onPreviewTap(offset) }
                         }
                         .pointerInput(camera) {
                             detectTransformGestures { _, _, zoom, _ ->
@@ -607,6 +671,48 @@ fun CameraScreen(
 
             if (flashAlpha > 0f) {
                 Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = flashAlpha)))
+            }
+
+            if (appSnapshot.gridLines) {
+                androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                    val stroke = 1.dp.toPx()
+                    val c = Color.White.copy(alpha = 0.32f)
+                    for (i in 1..2) {
+                        val x = size.width * i / 3f
+                        val y = size.height * i / 3f
+                        drawLine(c, androidx.compose.ui.geometry.Offset(x, 0f), androidx.compose.ui.geometry.Offset(x, size.height), stroke)
+                        drawLine(c, androidx.compose.ui.geometry.Offset(0f, y), androidx.compose.ui.geometry.Offset(size.width, y), stroke)
+                    }
+                }
+            }
+
+            focusPoint?.let { fp ->
+                val half = 34.dp
+                Box(
+                    modifier =
+                        Modifier.offset(
+                                x = with(density) { fp.x.toDp() } - half,
+                                y = with(density) { fp.y.toDp() } - half,
+                            )
+                            .size(half * 2)
+                            .border(
+                                1.5.dp,
+                                if (focusLocked) MaterialTheme.colorScheme.primary else Color.White,
+                                RoundedCornerShape(4.dp),
+                            )
+                )
+                if (focusLocked) {
+                    Text(
+                        text = stringResource(R.string.af_locked),
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier =
+                            Modifier.offset(
+                                x = with(density) { fp.x.toDp() } - half,
+                                y = with(density) { fp.y.toDp() } + half + 2.dp,
+                            ),
+                    )
+                }
             }
 
             if (detectedQr != null) {
@@ -658,6 +764,10 @@ fun CameraScreen(
                 timelapseActive = timelapseActive,
                 isCapturing = isCapturing,
                 isRecording = recording != null,
+                gridOn = appSnapshot.gridLines,
+                hasMedia = lastMediaUri != null,
+                onToggleGrid = { appSettings.gridLines = !appSettings.gridLines },
+                onOpenGallery = ::openGallery,
                 onCapturePhoto = ::capturePhoto,
                 onToggleRecording = ::toggleRecording,
                 onToggleTimelapse = {
@@ -680,8 +790,15 @@ fun CameraScreen(
                         msg(R.string.snack_bg_record_stopped)
                     } else if (viewModel.noCameraAvailable) {
                         msg(R.string.snack_bg_record_unsupported)
+                    } else if (
+                        ContextCompat.checkSelfPermission(
+                            context,
+                            android.Manifest.permission.CAMERA,
+                        ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                    ) {
+                        msg(R.string.snack_bg_record_no_permission)
                     } else {
-                        BackgroundCameraService.start(context)
+                        BackgroundCameraService.start(context, lensFront = settings.isFrontCamera)
                         msg(R.string.snack_bg_record_started)
                     }
                 },

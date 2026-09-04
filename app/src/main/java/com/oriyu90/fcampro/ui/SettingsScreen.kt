@@ -144,6 +144,11 @@ fun SettingsScreen(onBack: () -> Unit) {
                 onSelect = { settings.timelapseIntervalSeconds = it },
             )
             ToggleRow(
+                title = stringResource(R.string.settings_grid),
+                checked = snapshot.gridLines,
+                onCheckedChange = { settings.gridLines = it },
+            )
+            ToggleRow(
                 title = stringResource(R.string.settings_shutter_sound),
                 checked = snapshot.shutterSound,
                 onCheckedChange = { settings.shutterSound = it },

@@ -4,6 +4,7 @@ import android.content.res.Configuration
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.ImageCapture
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,6 +30,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AutoMode
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Crop169
@@ -38,9 +40,12 @@ import androidx.compose.material.icons.filled.FlashAuto
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.FlipCameraAndroid
+import androidx.compose.material.icons.filled.GridOff
+import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.PanoramaHorizontal
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SlowMotionVideo
@@ -48,7 +53,10 @@ import androidx.compose.material.icons.filled.Timelapse
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedFilterChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -91,6 +99,10 @@ fun CameraOverlay(
     timelapseActive: Boolean,
     isCapturing: Boolean,
     isRecording: Boolean,
+    gridOn: Boolean,
+    hasMedia: Boolean,
+    onToggleGrid: () -> Unit,
+    onOpenGallery: () -> Unit,
     onCapturePhoto: () -> Unit,
     onToggleRecording: () -> Unit,
     onToggleTimelapse: () -> Unit,
@@ -105,7 +117,7 @@ fun CameraOverlay(
         config.orientation == Configuration.ORIENTATION_LANDSCAPE || config.screenWidthDp >= 600
 
     val top: @Composable (Modifier) -> Unit = { m ->
-        TopControls(viewModel, settings, onOpenSettings, m)
+        TopControls(viewModel, settings, gridOn, onToggleGrid, onOpenSettings, m)
     }
     val bottom: @Composable (Modifier) -> Unit = { m ->
         BottomControls(
@@ -118,6 +130,8 @@ fun CameraOverlay(
             timelapseActive = timelapseActive,
             isCapturing = isCapturing,
             isRecording = isRecording,
+            hasMedia = hasMedia,
+            onOpenGallery = onOpenGallery,
             onCapturePhoto = onCapturePhoto,
             onToggleRecording = onToggleRecording,
             onToggleTimelapse = onToggleTimelapse,
@@ -170,6 +184,8 @@ fun CameraOverlay(
 private fun TopControls(
     viewModel: CameraViewModel,
     settings: CameraSettings,
+    gridOn: Boolean,
+    onToggleGrid: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -231,6 +247,13 @@ private fun TopControls(
                 tint = Color.White,
             )
         }
+        IconButton(onClick = onToggleGrid) {
+            Icon(
+                imageVector = if (gridOn) Icons.Default.GridOn else Icons.Default.GridOff,
+                contentDescription = stringResource(R.string.cd_grid),
+                tint = if (gridOn) MaterialTheme.colorScheme.primary else Color.White,
+            )
+        }
         IconButton(onClick = { viewModel.toggleAeAfLock() }) {
             Icon(
                 imageVector = if (settings.aeAfLocked) Icons.Default.Lock else Icons.Default.LockOpen,
@@ -267,6 +290,8 @@ private fun BottomControls(
     timelapseActive: Boolean,
     isCapturing: Boolean,
     isRecording: Boolean,
+    hasMedia: Boolean,
+    onOpenGallery: () -> Unit,
     onCapturePhoto: () -> Unit,
     onToggleRecording: () -> Unit,
     onToggleTimelapse: () -> Unit,
@@ -281,33 +306,19 @@ private fun BottomControls(
             ManualPanel(viewModel, settings, profiles)
         }
 
+        // Compact lens picker (small pop button) — available in PHOTO / VIDEO.
         val lenses = availableLenses.filter { it.isFront == settings.isFrontCamera }
-        if (lenses.size > 1) {
-            LazyRow(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        if (lenses.size > 1 && settings.cameraMode != CameraMode.OTHERS && external == null) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.Center,
             ) {
-                items(lenses, key = { it.id }) { lens ->
-                    val selected = settings.currentLens?.id == lens.id
-                    Box(
-                        modifier =
-                            Modifier.size(44.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (selected) MaterialTheme.colorScheme.primary
-                                    else Color.DarkGray
-                                )
-                                .clickable { viewModel.setLens(lens) },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = lensLabel(lens.type),
-                            color = if (selected) MaterialTheme.colorScheme.onPrimary else Color.White,
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 1,
-                        )
-                    }
-                }
+                LensMenuButton(
+                    lenses = lenses,
+                    current = settings.currentLens,
+                    enabled = !isRecording,
+                    onSelect = { viewModel.setLens(it) },
+                )
             }
         }
 
@@ -356,12 +367,16 @@ private fun BottomControls(
                     }
                 }
             } else {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(20.dp),
+                ) {
                     if (external != null) {
                         TextButton(onClick = onCancelExternal) {
                             Text(stringResource(R.string.action_cancel), color = Color.White)
                         }
-                        Spacer(Modifier.width(24.dp))
+                    } else {
+                        GalleryButton(enabled = hasMedia, onClick = onOpenGallery)
                     }
                     ShutterButton(
                         isVideo = settings.cameraMode == CameraMode.VIDEO,
@@ -372,6 +387,9 @@ private fun BottomControls(
                             else onCapturePhoto()
                         },
                     )
+                    if (external == null) {
+                        Spacer(Modifier.size(48.dp)) // visual balance opposite the gallery button
+                    }
                 }
             }
         }
@@ -400,6 +418,74 @@ private fun BottomControls(
                 )
             }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LensMenuButton(
+    lenses: List<CameraLensInfo>,
+    current: CameraLensInfo?,
+    enabled: Boolean,
+    onSelect: (CameraLensInfo) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        AssistChip(
+            onClick = { if (enabled) open = true },
+            enabled = enabled,
+            label = { Text(current?.let { lensLabel(it.type) } ?: stringResource(R.string.cd_lens)) },
+            trailingIcon = {
+                Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+            },
+            modifier = Modifier.semantics { contentDescription = "lens" },
+        )
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            lenses.forEach { lens ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            lensLabel(lens.type) +
+                                "  ·  ${"%.1f".format(lens.focalLength)}mm"
+                        )
+                    },
+                    onClick = {
+                        onSelect(lens)
+                        open = false
+                    },
+                    leadingIcon = {
+                        if (current?.id == lens.id) {
+                            Icon(Icons.Default.Lock, contentDescription = null)
+                        }
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GalleryButton(enabled: Boolean, onClick: () -> Unit) {
+    val cd = stringResource(R.string.cd_gallery)
+    Box(
+        modifier =
+            Modifier.size(48.dp)
+                .semantics { contentDescription = cd }
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color.White.copy(alpha = if (enabled) 0.18f else 0.06f))
+                .border(
+                    1.dp,
+                    Color.White.copy(alpha = if (enabled) 0.6f else 0.2f),
+                    RoundedCornerShape(10.dp),
+                )
+                .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Default.PhotoLibrary,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = if (enabled) 1f else 0.4f),
+        )
     }
 }
 
@@ -450,23 +536,39 @@ private fun ManualPanel(
     var showSave by remember { mutableStateOf(false) }
     var editProfile by remember { mutableStateOf<CameraProfile?>(null) }
 
+    fun update(iso: Int?, shutter: Long?, focus: Float?, wb: Int?) =
+        viewModel.updateManualSettings(iso, shutter, focus, wb)
+
     Column(
         modifier =
-            Modifier.fillMaxWidth().heightIn(max = 240.dp).verticalScroll(rememberScrollState())
+            Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState())
     ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            TextButton(
+                onClick = { update(null, null, null, null) },
+                enabled =
+                    settings.iso != null ||
+                        settings.shutterSpeedNs != null ||
+                        settings.focusDistance != null ||
+                        settings.whiteBalanceMode != null,
+            ) {
+                Text(stringResource(R.string.manual_all_auto))
+            }
+        }
+
         val isoRange = caps.isoRange ?: 50..3200
         LabeledSlider(
             label = stringResource(R.string.label_iso),
             valueText = settings.iso?.toString() ?: stringResource(R.string.value_auto),
             value = settings.iso?.toFloat() ?: isoRange.first.toFloat(),
             range = isoRange.first.toFloat()..isoRange.last.toFloat(),
+            isAuto = settings.iso == null,
+            onAuto = { update(null, settings.shutterSpeedNs, settings.focusDistance, settings.whiteBalanceMode) },
             onChange = {
-                viewModel.updateManualSettings(
-                    it.toInt(),
-                    settings.shutterSpeedNs,
-                    settings.focusDistance,
-                    settings.whiteBalanceMode,
-                )
+                update(it.toInt(), settings.shutterSpeedNs, settings.focusDistance, settings.whiteBalanceMode)
             },
         )
 
@@ -479,13 +581,10 @@ private fun ManualPanel(
             valueText = shutterText,
             value = settings.shutterSpeedNs?.toFloat() ?: expRange.first.toFloat(),
             range = expRange.first.toFloat()..expRange.last.toFloat(),
+            isAuto = settings.shutterSpeedNs == null,
+            onAuto = { update(settings.iso, null, settings.focusDistance, settings.whiteBalanceMode) },
             onChange = {
-                viewModel.updateManualSettings(
-                    settings.iso,
-                    it.toLong(),
-                    settings.focusDistance,
-                    settings.whiteBalanceMode,
-                )
+                update(settings.iso, it.toLong(), settings.focusDistance, settings.whiteBalanceMode)
             },
         )
 
@@ -497,13 +596,10 @@ private fun ManualPanel(
                     ?: stringResource(R.string.value_auto),
             value = settings.focusDistance ?: 0f,
             range = 0f..focusMax,
+            isAuto = settings.focusDistance == null,
+            onAuto = { update(settings.iso, settings.shutterSpeedNs, null, settings.whiteBalanceMode) },
             onChange = {
-                viewModel.updateManualSettings(
-                    settings.iso,
-                    settings.shutterSpeedNs,
-                    it,
-                    settings.whiteBalanceMode,
-                )
+                update(settings.iso, settings.shutterSpeedNs, it, settings.whiteBalanceMode)
             },
         )
 
@@ -516,19 +612,16 @@ private fun ManualPanel(
                 value = settings.whiteBalanceMode?.toFloat() ?: 1f,
                 range = 1f..8f,
                 steps = 6,
+                isAuto = settings.whiteBalanceMode == null,
+                onAuto = { update(settings.iso, settings.shutterSpeedNs, settings.focusDistance, null) },
                 onChange = {
-                    viewModel.updateManualSettings(
-                        settings.iso,
-                        settings.shutterSpeedNs,
-                        settings.focusDistance,
-                        it.toInt(),
-                    )
+                    update(settings.iso, settings.shutterSpeedNs, settings.focusDistance, it.toInt())
                 },
             )
         }
 
         Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -547,7 +640,7 @@ private fun ManualPanel(
         }
 
         Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -657,11 +750,7 @@ private fun ManualPanel(
             onDismissRequest = { editProfile = null },
             title = { Text(stringResource(R.string.edit_profile_title)) },
             text = {
-                TextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    singleLine = true,
-                )
+                TextField(value = name, onValueChange = { name = it }, singleLine = true)
             },
             confirmButton = {
                 Button(
@@ -682,6 +771,7 @@ private fun ManualPanel(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LabeledSlider(
     label: String,
@@ -689,17 +779,19 @@ private fun LabeledSlider(
     value: Float,
     range: ClosedFloatingPointRange<Float>,
     steps: Int = 0,
+    isAuto: Boolean = false,
+    onAuto: (() -> Unit)? = null,
     onChange: (Float) -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = "$label: $valueText",
             color = Color.White,
-            modifier = Modifier.width(112.dp),
+            modifier = Modifier.width(108.dp),
             style = MaterialTheme.typography.labelSmall,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -711,6 +803,18 @@ private fun LabeledSlider(
             steps = steps,
             modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
         )
+        if (onAuto != null) {
+            TextButton(
+                onClick = onAuto,
+                enabled = !isAuto,
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
+            ) {
+                Text(
+                    stringResource(R.string.manual_set_auto),
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+        }
     }
 }
 

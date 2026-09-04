@@ -21,6 +21,10 @@
     <string name="cd_stop_recording">録画を停止</string>
     <string name="cd_qr_detected">QR コードを検出しました</string>
     <string name="cd_zoom">ズーム</string>
+    <string name="cd_grid">グリッド線</string>
+    <string name="cd_gallery">撮影した写真・動画を見る</string>
+    <string name="cd_lens">レンズを選択</string>
+    <string name="af_locked">AF ロック中</string>
 
     <!-- マニュアル操作 -->
     <string name="label_iso">ISO</string>
@@ -33,6 +37,8 @@
     <string name="mic_mono">モノラル</string>
     <string name="mic_stereo">ステレオ</string>
     <string name="manual_unsupported">このレンズはマニュアル制御に対応していません。</string>
+    <string name="manual_all_auto">すべてオート</string>
+    <string name="manual_set_auto">オート</string>
 
     <!-- プロファイル -->
     <string name="save_profile">プロファイルを保存</string>
@@ -77,6 +83,9 @@
     <string name="snack_slowmo_unsupported">このバージョンではスローモーション撮影を利用できません</string>
     <string name="snack_panorama_unsupported">このバージョンではパノラマ撮影を利用できません</string>
     <string name="snack_lens_switch_failed">そのレンズに切り替えできませんでした</string>
+    <string name="snack_no_media">まだ撮影した写真・動画がありません</string>
+    <string name="snack_open_failed">アプリを開けませんでした</string>
+    <string name="snack_bg_record_no_permission">バックグラウンド録画にはカメラ権限が必要です</string>
 
     <!-- レンズ名 -->
     <string name="lens_wide">広角</string>
@@ -106,6 +115,7 @@
     <string name="timer_off">オフ</string>
     <string name="timer_seconds">%1$d 秒</string>
     <string name="settings_timelapse_interval">タイムラプスの間隔</string>
+    <string name="settings_grid">グリッド線を表示</string>
     <string name="settings_shutter_sound">シャッター音</string>
     <string name="settings_bg_audio">バックグラウンド録画で音声を記録する</string>
     <string name="settings_section_about">このアプリについて</string>
@@ -122,6 +132,7 @@
     <string name="notif_channel_desc">Fcam pro がバックグラウンドで録画している間に表示されます</string>
     <string name="notif_recording_title">Fcam pro</string>
     <string name="notif_recording_text">バックグラウンドで録画しています</string>
+    <string name="notif_recording_elapsed">バックグラウンドで録画中 · %1$s</string>
     <string name="notif_starting_text">バックグラウンド録画を開始しています…</string>
     <string name="notif_stop">停止</string>
 </resources>

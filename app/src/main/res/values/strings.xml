@@ -21,6 +21,10 @@
     <string name="cd_stop_recording">Stop recording</string>
     <string name="cd_qr_detected">QR code detected</string>
     <string name="cd_zoom">Zoom</string>
+    <string name="cd_grid">Grid lines</string>
+    <string name="cd_gallery">View captured photos and videos</string>
+    <string name="cd_lens">Select lens</string>
+    <string name="af_locked">AF locked</string>
 
     <!-- Manual controls -->
     <string name="label_iso">ISO</string>
@@ -33,6 +37,8 @@
     <string name="mic_mono">Mono</string>
     <string name="mic_stereo">Stereo</string>
     <string name="manual_unsupported">This lens does not expose manual controls.</string>
+    <string name="manual_all_auto">All auto</string>
+    <string name="manual_set_auto">Auto</string>
 
     <!-- Profiles -->
     <string name="save_profile">Save profile</string>
@@ -77,6 +83,9 @@
     <string name="snack_slowmo_unsupported">Slow-motion capture is not available in this version</string>
     <string name="snack_panorama_unsupported">Panorama capture is not available in this version</string>
     <string name="snack_lens_switch_failed">Could not switch to that lens</string>
+    <string name="snack_no_media">No captured photos or videos yet</string>
+    <string name="snack_open_failed">Could not open that app</string>
+    <string name="snack_bg_record_no_permission">Background recording needs the camera permission</string>
 
     <!-- Lens labels -->
     <string name="lens_wide">Wide</string>
@@ -106,6 +115,7 @@
     <string name="timer_off">Off</string>
     <string name="timer_seconds">%1$d s</string>
     <string name="settings_timelapse_interval">Time-lapse interval</string>
+    <string name="settings_grid">Show grid lines</string>
     <string name="settings_shutter_sound">Shutter sound</string>
     <string name="settings_bg_audio">Record audio in background mode</string>
     <string name="settings_section_about">About</string>
@@ -122,6 +132,7 @@
     <string name="notif_channel_desc">Shows while Fcam pro records video in the background</string>
     <string name="notif_recording_title">Fcam pro</string>
     <string name="notif_recording_text">Recording video in the background</string>
+    <string name="notif_recording_elapsed">Recording in the background · %1$s</string>
     <string name="notif_starting_text">Starting background recording…</string>
     <string name="notif_stop">Stop</string>
 </resources>

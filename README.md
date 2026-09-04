@@ -15,11 +15,11 @@ localized Japanese / English interface.
 
 | Area | What you get |
 |---|---|
-| Capture | Photo & video, 4:3 / 16:9, self-timer (0/3/10 s), flash auto/on/off, tap-to-focus, pinch-to-zoom |
-| Manual controls | ISO, shutter speed, focus distance and white balance — every slider is clamped to the ranges the selected physical camera actually reports |
-| Lenses | Ultra-wide / wide / tele / macro / front — the app binds the real `cameraId`, not just a lens-facing flag |
+| Capture | Photo & video, 4:3 / 16:9, self-timer (0/3/10 s), flash auto/on/off, rule-of-thirds grid, tap to lock / unlock focus, pinch-to-zoom, one-tap jump to the system gallery |
+| Manual controls | ISO, shutter speed, focus distance and white balance — every slider is clamped to the ranges the selected physical camera actually reports, and each one (or all at once) can be set back to Auto |
+| Lenses | Ultra-wide / wide / tele / macro / front — the app binds the real `cameraId`, not just a lens-facing flag; a compact pop-up switcher is available in photo and video mode |
 | Profiles | Save, rename, delete and re-apply manual setups (Room database, survives reinstall-safe destructive migration) |
-| OTHERS | Time-lapse (configurable 1–10 s interval, auto-stop on repeated errors), background video recording via a foreground service, QR detection with open / copy |
+| OTHERS | Time-lapse (configurable 1–10 s interval, auto-stop on repeated errors), background video recording via a foreground service with an elapsed-time notification, QR detection with open / copy |
 | System integration | Registers for `IMAGE_CAPTURE` / `VIDEO_CAPTURE` / `STILL_IMAGE_CAMERA`, so it can be set as the OS default camera app and returns results to the caller |
 | Localization | English (default) and 日本語, switchable in-app; initial value follows the device locale |
 | Safety | Fixed dark theme, edge-to-edge insets, every camera path wrapped with error reporting, no crash on unsupported hardware |
@@ -80,7 +80,7 @@ app/src/main/java/com/oriyu90/fcampro/
     └── theme/               # fixed dark Material 3 theme
 ```
 
-## Known limitations (v1.0.0)
+## Known limitations (v1.0.1)
 
 - Background recording continues while the process is alive (screen off / app
   backgrounded). Fully detached indefinite recording is out of scope.
@@ -105,10 +105,10 @@ MIT — see [LICENSE](LICENSE). Author: **Yuki_Orita** (折田悠希 / おりた
 
 ### 主な機能
 
-- 写真／動画、4:3・16:9、セルフタイマー（0/3/10 秒）、フラッシュ、タップ AF、ピンチズーム
+- 写真／動画、4:3・16:9、セルフタイマー（0/3/10 秒）、フラッシュ、三分割グリッド、タップでフォーカス固定／解除、ピンチズーム、標準ギャラリーへのワンタップ遷移
 - ISO・シャッター速度・フォーカス距離・ホワイトバランスのマニュアル制御
-  （各スライダーは選択中の物理カメラが報告する範囲に自動でクランプ）
-- 超広角／広角／望遠／マクロ／前面レンズを実 `cameraId` で切り替え
+  （各スライダーは選択中の物理カメラが報告する範囲に自動でクランプ。各項目・一括でオートに戻せる）
+- 超広角／広角／望遠／マクロ／前面レンズを実 `cameraId` で切り替え（写真・動画モードでは小さなポップアップで選択）
 - マニュアル設定のプロファイル保存・改名・削除・再適用（Room）
 - タイムラプス（間隔 1〜10 秒、連続エラー時に自動停止）、バックグラウンド録画、QR 検出
 - `IMAGE_CAPTURE` / `VIDEO_CAPTURE` に対応し、OS の標準カメラアプリに設定可能
