@@ -1,5 +1,17 @@
 # Fcam pro — 設計概要と実装状況（v2.2.0）
 
+## 互換性ハードニング（v2.2.0 リリース後の精査・修正）
+
+多様な HAL・API 24〜36・センサ構成に対する精査で見つけた問題と修正:
+
+- **F1 スロー bind のフォールバック**: 高 fps 要求（`CONTROL_AE_TARGET_FPS_RANGE`）を拒否する厳格な HAL では、従来は bind 全体が例外→カメラ死亡（プレビュー黒・シャッター無反応）だった。`bindVideoUseCases(useHighSpeed)` に切り出し、高 fps bind→失敗時は通常 bind に再試行する二段構えに。`Camera2Interop.Extender` が `VideoCapture.Builder` を受け付けられることは camera-camera2 1.5.0 の artifact（`ExtendableBuilder` 実装）で実確認済み。
+- **F2 パノラマの JPEG 対応**: `YuvConverter` は YUV_420_888 のみ受理し、JPEG バインドの `ImageProxy`（単一プレーン）を無言で破棄していた。JPEG バイト列のデコード経路を追加し、回転適用を共通化。不明形式は従来どおり null（フレーム skip）。
+- **F3 変換のスレッド移動**: フル解像度 YUV→JPEG 変換をメインスレッド（`OnImageCapturedCallback` 直下）で実行しており、高画素センサーで jank・ANR の恐れがあった。`Dispatchers.Default` の coroutine 内へ移動し、`image.close()` も同所で実施（close 前なら他スレッド利用は安全）。
+- **F4 回転センサなし端末**: `TYPE_ROTATION_VECTOR` 不在では方位が来ず 1 枚目で停滞→終了時に破棄という詰みだった。センサ不在時は 2.5 秒間隔のタイマー撮影に切替（`FALLBACK_CAPTURE_INTERVAL_MS`）。
+- **F5 パノラマのフラッシュ固定 OFF**: スイープ中に毎枚フラッシュが焚かれると露出がばらつき合成が壊れるため、PANORAMA bind は設定値によらず `FLASH_MODE_OFF`。
+- **F6 低 RAM 適応**: `memoryClass <= 128` の端末ではフレーム幅 960px・最大 6 枚に縮小（`PanoEstimate.maxFrameWidth/maxFrames`、単体テスト済み）。通常は 1280px・8 枚。
+- 精査で問題なしを確認した項目: 高速動画・RAW・露出補正・ズームの特性取得はすべて `detectLenses` の try/catch 内で実行（HAL の不正値でも検出全体が死なない）。`setOutputFormat` の RAW 要求は Camera2 側ゲート＋`takePicture` の onError 経路あり。DNG の MediaStore 保存は API 24〜28 でも動作（`RELATIVE_PATH` のみ Q+ ガード）。`MediaMuxer(path)` は API 18+ のため minSdk 24 で問題なし。RAW＋フラッシュの可否は HAL 依存のため失敗時はエラー通知（仕様として README に明記）。
+
 ## v2.2.0 の変更点（スローモーション・パノラマ・露出補正・スマホUI刷新・センサーRAW保存形式）
 
 - **撮影モード追加**: `CameraMode` に SLOWMO / PANORAMA を追加（PHOTO / VIDEO / SLOWMO / PANO / OTHERS の5タブ）。OTHERS のスロー・パノラマ項目は未対応 Snackbar ではなく各モードへの遷移になった。マニュアルパネルは従来どおり PHOTO/VIDEO のみ（SLOWMO/PANORAMA/OTHERS では `setMode` で `isManualMode=false`）。

@@ -199,6 +199,12 @@ fun CameraScreen(
     var panoAzimuth by remember { mutableStateOf<Float?>(null) }
     var currentAzimuth by remember { mutableStateOf<Float?>(null) }
     var lastPanoCaptureAt by remember { mutableStateOf(0L) }
+    // Low-RAM devices stitch smaller, fewer frames to avoid OOM kills.
+    val memoryClassMb =
+        remember {
+            context.getSystemService(android.app.ActivityManager::class.java)?.memoryClass ?: 256
+        }
+    val panoMaxFrames = PanoEstimate.maxFrames(memoryClassMb)
 
     val appSnapshot by appSettings.state.collectAsState()
     var batteryPct by remember { mutableStateOf<Int?>(null) }
@@ -378,6 +384,48 @@ fun CameraScreen(
 
         val previewBuilder = Preview.Builder().setResolutionSelector(resolutionSelector)
 
+        val slowMoHs =
+            if (settings.cameraMode == CameraMode.SLOWMO) {
+                settings.currentLens?.capabilities?.highSpeedVideo
+            } else {
+                null
+            }
+
+        fun bindVideoUseCases(useHighSpeed: Boolean): Camera {
+            val pb = Preview.Builder().setResolutionSelector(resolutionSelector)
+            val qualities =
+                if (settings.cameraMode == CameraMode.SLOWMO) {
+                    // High-speed sensors top out at modest resolutions; prefer HD.
+                    listOf(Quality.HD, Quality.SD)
+                } else {
+                    listOf(Quality.FHD, Quality.HD, Quality.SD)
+                }
+            val recorder =
+                Recorder.Builder()
+                    .setQualitySelector(QualitySelector.fromOrderedList(qualities))
+                    .build()
+            val vb = VideoCapture.Builder(recorder)
+            if (useHighSpeed && slowMoHs != null) {
+                // Request a fixed high frame rate on both streams. Strict HALs
+                // reject the combination; callers fall back to a plain bind.
+                val fpsRange = Range(slowMoHs.maxFps, slowMoHs.maxFps)
+                Camera2Interop.Extender(vb)
+                    .setCaptureRequestOption(
+                        CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                        fpsRange,
+                    )
+                Camera2Interop.Extender(pb)
+                    .setCaptureRequestOption(
+                        CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                        fpsRange,
+                    )
+            }
+            val pv = pb.build().also { it.surfaceProvider = previewView.surfaceProvider }
+            val vc = vb.build()
+            videoCapture = vc
+            return provider.bindToLifecycle(lifecycleOwner, selector, pv, vc)
+        }
+
         try {
             camera =
                 if (settings.cameraMode == CameraMode.VIDEO ||
@@ -388,46 +436,15 @@ fun CameraScreen(
                     qrAnalyzer?.release()
                     qrAnalyzer = null
                     imageCapture = null
-                    val qualities =
-                        if (settings.cameraMode == CameraMode.SLOWMO) {
-                            // High-speed sensors top out at modest resolutions; prefer HD.
-                            listOf(Quality.HD, Quality.SD)
-                        } else {
-                            listOf(Quality.FHD, Quality.HD, Quality.SD)
-                        }
-                    val recorder =
-                        Recorder.Builder()
-                            .setQualitySelector(QualitySelector.fromOrderedList(qualities))
-                            .build()
-                    val vcBuilder = VideoCapture.Builder(recorder)
-                    val hs =
-                        if (settings.cameraMode == CameraMode.SLOWMO) {
-                            settings.currentLens?.capabilities?.highSpeedVideo
-                        } else {
-                            null
-                        }
-                    if (hs != null) {
-                        // Request a fixed high frame rate on both streams; the HAL
-                        // falls back to the closest supported range when the exact
-                        // value is unavailable.
-                        val fpsRange = Range(hs.maxFps, hs.maxFps)
-                        Camera2Interop.Extender(vcBuilder)
-                            .setCaptureRequestOption(
-                                CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
-                                fpsRange,
-                            )
-                        Camera2Interop.Extender(previewBuilder)
-                            .setCaptureRequestOption(
-                                CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
-                                fpsRange,
-                            )
+                    if (settings.cameraMode == CameraMode.SLOWMO && slowMoHs != null) {
+                        // High-fps bind first; strict HALs that reject the fps
+                        // range still get a working preview + normal recording
+                        // instead of a dead camera.
+                        runCatching { bindVideoUseCases(useHighSpeed = true) }
+                            .getOrElse { bindVideoUseCases(useHighSpeed = false) }
+                    } else {
+                        bindVideoUseCases(useHighSpeed = false)
                     }
-                    val preview = previewBuilder.build().also {
-                        it.surfaceProvider = previewView.surfaceProvider
-                    }
-                    val vc = vcBuilder.build()
-                    videoCapture = vc
-                    provider.bindToLifecycle(lifecycleOwner, selector, preview, vc)
                 } else {
                     videoCapture = null
                     val preview = previewBuilder.build().also {
@@ -452,7 +469,15 @@ fun CameraScreen(
                     val icBuilder =
                         ImageCapture.Builder()
                             .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                            .setFlashMode(settings.flashMode)
+                            // Sweep frames must share exposure: a per-frame flash
+                            // would poison the stitch, so panorama never flashes.
+                            .setFlashMode(
+                                if (settings.cameraMode == CameraMode.PANORAMA) {
+                                    ImageCapture.FLASH_MODE_OFF
+                                } else {
+                                    settings.flashMode
+                                }
+                            )
                             .setResolutionSelector(resolutionSelector)
                             .setOutputFormat(stillOutputFormat)
                     val ic = icBuilder.build()
@@ -945,23 +970,30 @@ fun CameraScreen(
     }
 
     fun capturePanoFrame(ic: ImageCapture) {
-        if (panoFrameInFlight || panoFrames.size >= PanoEstimate.MAX_FRAMES) return
+        if (panoFrameInFlight || panoFrames.size >= panoMaxFrames) return
         panoFrameInFlight = true
         ic.takePicture(
             ContextCompat.getMainExecutor(context),
             object : ImageCapture.OnImageCapturedCallback() {
                 override fun onCaptureSuccess(image: ImageProxy) {
-                    val bmp = YuvConverter.imageProxyToBitmap(image)
-                    image.close()
+                    // Full-res YUV->JPEG conversion runs off the main thread:
+                    // on high-megapixel sensors it would otherwise jank or ANR.
                     scope.launch(Dispatchers.Default) {
+                        val bmp = YuvConverter.imageProxyToBitmap(image)
+                        runCatching { image.close() }
                         val frame =
-                            bmp?.let { PanoramaStitcher.downscaleToMaxWidth(it) }
+                            bmp?.let {
+                                PanoramaStitcher.downscaleToMaxWidth(
+                                    it,
+                                    PanoEstimate.maxFrameWidth(memoryClassMb),
+                                )
+                            }
                         if (frame != null && frame !== bmp) bmp.recycle()
                         if (frame != null) {
                             panoFrames = panoFrames + frame
                             currentAzimuth?.let { panoAzimuth = it }
                             lastPanoCaptureAt = System.currentTimeMillis()
-                            if (panoFrames.size >= PanoEstimate.MAX_FRAMES) finishPanorama()
+                            if (panoFrames.size >= panoMaxFrames) finishPanorama()
                         }
                         panoFrameInFlight = false
                     }
@@ -990,6 +1022,10 @@ fun CameraScreen(
 
     // --- Panorama yaw tracking (rotation vector; no permission needed) ---
     val sensorManager = remember { context.getSystemService(SensorManager::class.java) }
+    val hasRotationSensor =
+        remember(sensorManager) {
+            sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR) != null
+        }
     if (panoActive) {
         DisposableEffect(Unit) {
             val sensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
@@ -1025,11 +1061,28 @@ fun CameraScreen(
             return@LaunchedEffect
         }
         val ic = imageCapture ?: return@LaunchedEffect
-        if (panoFrames.size in 1 until PanoEstimate.MAX_FRAMES &&
+        if (panoFrames.size in 1 until panoMaxFrames &&
             abs(PanoEstimate.yawDelta(lastAz, az)) >= PanoEstimate.CAPTURE_STEP_DEG &&
             System.currentTimeMillis() - lastPanoCaptureAt >= PanoEstimate.MIN_CAPTURE_INTERVAL_MS
         ) {
             capturePanoFrame(ic)
+        }
+    }
+
+    // Devices without a rotation-vector sensor fall back to timer captures so
+    // panorama stays usable instead of stalling after the first frame.
+    LaunchedEffect(panoActive, hasRotationSensor) {
+        if (!panoActive || hasRotationSensor) return@LaunchedEffect
+        while (isActive && panoActive) {
+            kotlinx.coroutines.delay(PanoEstimate.FALLBACK_CAPTURE_INTERVAL_MS)
+            if (!panoActive || panoFrameInFlight) continue
+            val ic = imageCapture ?: continue
+            if (panoFrames.size in 1 until panoMaxFrames &&
+                System.currentTimeMillis() - lastPanoCaptureAt >=
+                    PanoEstimate.FALLBACK_CAPTURE_INTERVAL_MS
+            ) {
+                capturePanoFrame(ic)
+            }
         }
     }
 
@@ -1268,7 +1321,7 @@ fun CameraScreen(
                 },
                 panoActive = panoActive,
                 panoCount = panoFrames.size,
-                panoMax = PanoEstimate.MAX_FRAMES,
+                panoMax = panoMaxFrames,
                 onTogglePanorama = ::togglePanorama,
                 onCancelPanorama = ::cancelPanorama,
                 onToggleBackground = {

@@ -236,6 +236,15 @@ class CameraViewModelTest {
     }
 
     @Test
+    fun panoBudgetsShrinkOnLowRam() {
+        assertEquals(PanoEstimate.MAX_FRAMES, PanoEstimate.maxFrames(256))
+        assertEquals(PanoEstimate.MAX_FRAME_WIDTH, PanoEstimate.maxFrameWidth(256))
+        assertEquals(PanoEstimate.LOW_RAM_MAX_FRAMES, PanoEstimate.maxFrames(128))
+        assertEquals(PanoEstimate.LOW_RAM_FRAME_WIDTH, PanoEstimate.maxFrameWidth(96))
+        assertTrue(PanoEstimate.LOW_RAM_MAX_FRAMES >= 2)
+    }
+
+    @Test
     fun stitcherFindsVerticalOffset() {
         // Horizontal stripes (period 20px); next is shifted down by 6px.
         val w = 200

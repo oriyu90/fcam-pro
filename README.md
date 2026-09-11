@@ -86,15 +86,19 @@ app/src/main/java/com/oriyu90/fcampro/
 - Background recording continues while the process is alive (screen off / app
   backgrounded). Fully detached indefinite recording is out of scope.
 - Slow-motion needs a camera with constrained high-speed video (≥60 fps);
-  otherwise the shutter reports that the device is unsupported. Slow-mo clips
-  are saved silent (audio is dropped during the time-stretch).
+  otherwise the shutter reports that the device is unsupported. If the HAL
+  rejects the high-fps bind, the app falls back to a normal recording bind
+  so the preview never dies. Slow-mo clips are saved silent (audio is
+  dropped during the time-stretch).
 - RAW (DNG) stills ride on CameraX 1.5 `OUTPUT_FORMAT_RAW` / `OUTPUT_FORMAT_RAW_JPEG`,
   so they need a lens reporting `REQUEST_AVAILABLE_CAPABILITIES_RAW` plus
   `RAW_SENSOR` stream sizes; JPEG-only lenses hide the format selector.
   RAW output applies to plain PHOTO mode only (panorama, time-lapse and OS
-  capture requests stay JPEG).
+  capture requests stay JPEG). RAW + flash depends on the HAL; a failure is
+  reported as a capture error.
 - Panorama stitching is translation-only with feather blending — scenes with
-  strong parallax may show seams.
+  strong parallax may show seams. Frames never flash (fixed off for exposure
+  consistency); devices without a rotation sensor capture on a timer instead.
 - Physical sub-cameras hidden behind a logical multi-camera cannot always be
   selected individually; the app falls back to the default camera for that facing.
 - Real-device camera behaviour has been validated by compilation, unit tests,

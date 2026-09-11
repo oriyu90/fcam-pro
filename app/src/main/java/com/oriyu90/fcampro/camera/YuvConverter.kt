@@ -10,12 +10,17 @@ import androidx.camera.core.ImageProxy
 import java.io.ByteArrayOutputStream
 
 /**
- * Converts a YUV_420_888 [ImageProxy] to a [Bitmap], honoring rotation.
+ * Converts an [ImageProxy] to a [Bitmap], honoring rotation.
  * Used for panorama frame capture where full stills go through ImageCapture
  * but stitching needs in-memory bitmaps.
+ *
+ * Both YUV_420_888 (video-frame style analysis images) and JPEG (still
+ * captures from a JPEG-bound ImageCapture) are accepted; anything else
+ * returns null so the caller can skip the frame instead of crashing.
  */
 object YuvConverter {
     fun imageProxyToBitmap(image: ImageProxy): Bitmap? {
+        if (image.format == ImageFormat.JPEG) return jpegToBitmap(image)
         if (image.format != ImageFormat.YUV_420_888) return null
         val w = image.width
         val h = image.height
@@ -26,17 +31,30 @@ object YuvConverter {
             YuvImage(nv21, ImageFormat.NV21, w, h, null)
                 .compressToJpeg(Rect(0, 0, w, h), 95, out)
             val bytes = out.toByteArray()
-            var bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@runCatching null
-            val rotation = image.imageInfo.rotationDegrees
-            if (rotation != 0) {
-                val m = Matrix().apply { postRotate(rotation.toFloat()) }
-                val rotated =
-                    Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
-                if (rotated !== bmp) bmp.recycle()
-                bmp = rotated
-            }
-            bmp
+            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                ?: return@runCatching null
+            applyRotation(bmp, image.imageInfo.rotationDegrees)
         }.getOrNull()
+    }
+
+    private fun jpegToBitmap(image: ImageProxy): Bitmap? {
+        if (image.planes.isEmpty()) return null
+        return runCatching {
+            val buf = image.planes[0].buffer
+            val bytes = ByteArray(buf.remaining())
+            buf.get(bytes)
+            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                ?: return@runCatching null
+            applyRotation(bmp, image.imageInfo.rotationDegrees)
+        }.getOrNull()
+    }
+
+    private fun applyRotation(bmp: Bitmap, degrees: Int): Bitmap {
+        if (degrees == 0) return bmp
+        val m = Matrix().apply { postRotate(degrees.toFloat()) }
+        val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+        if (rotated !== bmp) bmp.recycle()
+        return rotated
     }
 
     private fun yuv420ToNv21(image: ImageProxy, w: Int, h: Int): ByteArray? {

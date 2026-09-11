@@ -11,6 +11,17 @@ object PanoEstimate {
     const val MIN_CAPTURE_INTERVAL_MS = 1200L
     const val OVERLAP_FRAC = 0.30f
     const val MAX_FRAME_WIDTH = 1280
+    /** Timer-based capture cadence when the device has no rotation sensor. */
+    const val FALLBACK_CAPTURE_INTERVAL_MS = 2500L
+    /** Tighter budgets for low-RAM devices (memoryClass <= 128MB). */
+    const val LOW_RAM_FRAME_WIDTH = 960
+    const val LOW_RAM_MAX_FRAMES = 6
+
+    fun maxFrameWidth(memoryClassMb: Int): Int =
+        if (memoryClassMb <= 128) LOW_RAM_FRAME_WIDTH else MAX_FRAME_WIDTH
+
+    fun maxFrames(memoryClassMb: Int): Int =
+        if (memoryClassMb <= 128) LOW_RAM_MAX_FRAMES else MAX_FRAMES
 
     /**
      * Wrap-aware yaw delta in degrees, range [-180, 180].
