@@ -362,7 +362,6 @@ fun CameraScreen(
         runCatching { provider.unbindAll() }
         focusLocked = false
         focusPoint = null
-
         val resolutionSelector =
             ResolutionSelector.Builder()
                 .setAspectRatioStrategy(
@@ -447,6 +446,14 @@ fun CameraScreen(
             return provider.bindToLifecycle(lifecycleOwner, selector, pv, vc)
         }
 
+        // Collapse rapid lens/mode taps into the final selection: without this
+        // pause, rebind races the previous session teardown and setup fails.
+        // LaunchedEffect cancellation keeps only the latest key set alive.
+        kotlinx.coroutines.delay(250)
+
+        var attempt = 0
+        var boundOk = false
+        while (!boundOk && attempt < 3) {
         try {
             camera =
                 if (settings.cameraMode == CameraMode.VIDEO ||
@@ -560,10 +567,18 @@ fun CameraScreen(
                         }
                     }
                 }
+            boundOk = true
         } catch (e: Exception) {
-            Log.e(TAG, "bind failed", e)
+            attempt++
             camera = null
-            msg(R.string.snack_camera_setup_failed, e.message ?: "")
+            if (attempt >= 3) {
+                Log.e(TAG, "bind failed", e)
+                msg(R.string.snack_camera_setup_failed, e.message ?: "")
+            } else {
+                // Give the HAL time to finish tearing down before retrying.
+                kotlinx.coroutines.delay(400)
+            }
+        }
         }
 
         // Startup / rebind contract: both the UI state and the physical camera
@@ -1506,7 +1521,19 @@ fun CameraScreen(
 
         Box(modifier = Modifier.fillMaxSize().background(Color.Black).padding(padding)) {
             if (!proMode) {
-                Box(Modifier.fillMaxSize()) {
+                // Capture-range-accurate preview in every mode: the box matches
+                // the still aspect so WYSIWYG holds (full-bleed FILL_CENTER
+                // would crop 4:3 captures on tall screens).
+                Box(
+                    when {
+                        !proLandscape ->
+                            Modifier.fillMaxWidth().aspectRatio(streamAspect)
+                                .align(Alignment.TopCenter)
+                        else ->
+                            Modifier.fillMaxHeight().aspectRatio(streamAspect)
+                                .align(Alignment.CenterStart)
+                    }
+                ) {
                     PreviewSurface(Modifier.fillMaxSize())
                     PreviewDecor()
                 }
@@ -1552,14 +1579,20 @@ fun CameraScreen(
                     Column(
                         Modifier.weight(if (compact) 1f else 1.25f),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
                     ) {
-                        ProPreviewBox(
-                            Modifier.fillMaxHeight()
-                                .padding(vertical = 12.dp)
-                                .aspectRatio(streamAspect)
-                        )
-                        ProSummaryLine(shared)
+                        // Reserved summary row: the aspect box alone would take
+                        // the full height and squeeze the summary to 0px.
+                        Box(
+                            Modifier.fillMaxWidth().weight(1f),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            ProPreviewBox(
+                                Modifier.fillMaxHeight()
+                                    .padding(vertical = 12.dp)
+                                    .aspectRatio(streamAspect)
+                            )
+                        }
+                        ProSummaryLine(shared, Modifier.padding(bottom = 4.dp))
                     }
                     ProPanelColumn(
                         modifier = Modifier.fillMaxHeight().weight(1f),
