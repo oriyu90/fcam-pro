@@ -1,15 +1,6 @@
-# Fcam pro — 設計概要と実装状況（v2.3.0）
+# Fcam pro — 設計概要と実装状況（v2.2.0）
 
-## v2.3.0 の変更点（センサーRAW保存形式）
-
-- **対応検出**: レンズ検出時に `REQUEST_AVAILABLE_CAPABILITIES_RAW`＋`RAW_SENSOR` ストリームサイズの有無で DNG 可否を判定（`RawCapability`）。ビット深度は `SENSOR_INFO_WHITE_LEVEL` からのヒューリスティック（1023→RAW10、4095→RAW12、16383→API 37 の RAW14、それ以外は不明）を UI バッジ表示専用に保持。センサーのパッキング形式自体は CameraX／DngCreator 側で消費し、アプリは DNG だけを扱う。
-- **保存形式**: `SaveFormat`（JPEG / JPEG+RAW / RAW）を `CameraSettings` に追加。プロモードのマニュアルパネル先頭にセレクタ（`SaveFormatSelector`、対応レンズのみ表示、非対応は JPEG に強制・セレクタ非表示）。レンズ切替時は対応状況で再クランプ。プロファイルには含めない（フラッシュ等と同様のセッション設定）。
-- **撮影パス**: CameraX 1.5 の `setOutputFormat(OUTPUT_FORMAT_RAW / RAW_JPEG)` を使用（Camera2 直叩きの自前セッションは不要）。bind 時に PHOTO かつ OS 要求なしの場合のみ RAW 系を要求し、それ以外（パノラマ・OTHERS・外部要求）は JPEG 固定。JPEG+RAW は `takePicture(rawOpts, jpegOpts, …)` の二重コールバックを MIME 判定（`image/x-adobe-dng`）で振り分け、両ファイルに保存完了通知。DNG は `Pictures/Fcam pro` に `.dng` で保存。
-- versionCode 7 / versionName 2.3.0。単体テスト 18 件＋ lint グリーン。
-
----
-
-## v2.2.0 の変更点（スローモーション・パノラマ・露出補正・スマホUI刷新）
+## v2.2.0 の変更点（スローモーション・パノラマ・露出補正・スマホUI刷新・センサーRAW保存形式）
 
 - **撮影モード追加**: `CameraMode` に SLOWMO / PANORAMA を追加（PHOTO / VIDEO / SLOWMO / PANO / OTHERS の5タブ）。OTHERS のスロー・パノラマ項目は未対応 Snackbar ではなく各モードへの遷移になった。マニュアルパネルは従来どおり PHOTO/VIDEO のみ（SLOWMO/PANORAMA/OTHERS では `setMode` で `isManualMode=false`）。
 - **スローモーション**: レンズ検出時に `SCALER_STREAM_CONFIGURATION_MAP.highSpeedVideoSizes`＋`getHighSpeedVideoFpsRangesFor` から最良設定を取得（最高fps優先、同率なら最大面積）。`CameraMode.SLOWMO` は Recorder＋VideoCapture を HD/SD 優先で bind し、`Camera2Interop` で `CONTROL_AE_TARGET_FPS_RANGE=[maxFps,maxFps]` を preview/video 両ストリームに要求。録画停止後に `SlowMoProcessor` が MediaExtractor/MediaMuxer で映像トラックのタイムスタンプを `recordFps/30` 倍に引き伸ばして保存（再エンコードなし、音声は破棄）。対応機なし（maxFps < 60）の端末ではシャッター時に「未対応」Snackbar。minSdk 24 のため mux は一時ファイル経由（FileDescriptor 受けの MediaMuxer は API 26+）。
@@ -17,7 +8,8 @@
 - **露出補正**: `CameraSettings.exposureCompensation`（EV インデックス、既定 0）を追加。検出時に `CONTROL_AE_COMPENSATION_RANGE` / `STEP` を取得し、AE 動作中（ISO・シャッター速度が両方 auto かつ AE_MODE_OFF でない）に `CONTROL_AE_EXPOSURE_COMPENSATION` を適用。マニュアルパネルでは露出が完全オートのときだけ速度スライダーの直下に EV スライダー（`label_ev`、`%+.1f EV` 表示、日英対応）を表示。全オートリセット・レンズ切替・プロファイル保存/読込にも EV を含めた。Room は v2 へ（`MIGRATION_1_2` で列追加、既存プロファイル保持）。
 - **スマホ UI 刷新**: PHONE_PORTRAIT を下部シャッターバー構成に（サムネイル | 大シャッター 78dp | 前後切替）。ズームピルはズーム中のみ表示し、レンズ選択は広角基準の倍率ピル行（×0.5 / ×1 / ×2…、`LensZoomPills`）に。モード切替は中央寄せの横スクロールタブ（iPhone 風）。シャッター振り分けは `SharedActions.onShutter()` に集約（全レイアウト共通）。
 - **タブレット空白の活用**: `SidePanelLayout` のパネル幅を `animateDpAsState`＋`animateContentSize` で可変に（通常 300dp、マニュアルパネル展開時は 460dp）。従来の `widthIn(max=380dp)` 固定を廃止。
-- versionCode 6 / versionName 2.2.0。単体テスト 15 件（EV クランプ・表示、スロー倍率、方位差、合成のずれ推定・幅合成を含む）＋ lint グリーン。
+- **センサーRAW保存形式**: レンズ検出時に `REQUEST_AVAILABLE_CAPABILITIES_RAW`＋`RAW_SENSOR` サイズで DNG 可否を判定（`RawCapability`）。ビット深度は `SENSOR_INFO_WHITE_LEVEL` のヒューリスティック（1023→RAW10、4095→RAW12、16383→API 37 の RAW14）を UI バッジ専用に保持。`SaveFormat`（JPEG / JPEG+RAW / RAW）をプロモードのマニュアルパネル先頭で選択（対応レンズのみ、非対応は JPEG 固定）。撮影は CameraX 1.5 の `setOutputFormat(OUTPUT_FORMAT_RAW / RAW_JPEG)` を使用し、PHOTO かつ OS 要求なしの場合のみ RAW 系を要求（パノラマ・OTHERS・外部要求は JPEG 固定）。JPEG+RAW は二重コールバックを MIME 判定で振り分け、DNG は `Pictures/Fcam pro` に `.dng` で保存。
+- versionCode 7 / versionName 2.2.0。単体テスト 18 件（EV クランプ・表示、スロー倍率、方位差、合成のずれ推定・幅合成、RAW 深度・形式フォールバックを含む）＋ lint グリーン。
 
 ---
 
