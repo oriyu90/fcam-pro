@@ -1,6 +1,6 @@
-# Fcam pro — 設計概要と実装状況（v2.2.0）
+# Fcam pro — 設計概要と実装状況（v2.2.1）
 
-## 互換性ハードニング（v2.2.0 リリース後の精査・修正）
+## 互換性ハードニング（v2.2.1: v2.2.0 リリース後の精査・修正）
 
 多様な HAL・API 24〜36・センサ構成に対する精査で見つけた問題と修正:
 
@@ -11,6 +11,7 @@
 - **F5 パノラマのフラッシュ固定 OFF**: スイープ中に毎枚フラッシュが焚かれると露出がばらつき合成が壊れるため、PANORAMA bind は設定値によらず `FLASH_MODE_OFF`。
 - **F6 低 RAM 適応**: `memoryClass <= 128` の端末ではフレーム幅 960px・最大 6 枚に縮小（`PanoEstimate.maxFrameWidth/maxFrames`、単体テスト済み）。通常は 1280px・8 枚。
 - 精査で問題なしを確認した項目: 高速動画・RAW・露出補正・ズームの特性取得はすべて `detectLenses` の try/catch 内で実行（HAL の不正値でも検出全体が死なない）。`setOutputFormat` の RAW 要求は Camera2 側ゲート＋`takePicture` の onError 経路あり。DNG の MediaStore 保存は API 24〜28 でも動作（`RELATIVE_PATH` のみ Q+ ガード）。`MediaMuxer(path)` は API 18+ のため minSdk 24 で問題なし。RAW＋フラッシュの可否は HAL 依存のため失敗時はエラー通知（仕様として README に明記）。
+- versionCode 8 / versionName 2.2.1。
 
 ## v2.2.0 の変更点（スローモーション・パノラマ・露出補正・スマホUI刷新・センサーRAW保存形式）
 
