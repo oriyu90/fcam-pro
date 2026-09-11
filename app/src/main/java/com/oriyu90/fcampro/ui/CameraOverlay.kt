@@ -1450,6 +1450,27 @@ private fun LabeledSlider(
     onAuto: (() -> Unit)? = null,
     onChange: (Float) -> Unit,
 ) {
+    // Degenerate HAL ranges (empty / inverted / single-point) would crash
+    // coerceIn or the Slider itself — render a static row instead.
+    val lo = range.start.coerceAtMost(range.endInclusive)
+    val hi = range.start.coerceAtLeast(range.endInclusive)
+    if (hi <= lo || !lo.isFinite() || !hi.isFinite()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "$label: $valueText",
+                color = Color.White,
+                modifier = Modifier.width(108.dp),
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        return
+    }
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1464,9 +1485,9 @@ private fun LabeledSlider(
             overflow = TextOverflow.Ellipsis,
         )
         Slider(
-            value = value.coerceIn(range.start, range.endInclusive),
+            value = value.coerceIn(lo, hi),
             onValueChange = onChange,
-            valueRange = range,
+            valueRange = lo..hi,
             steps = steps,
             modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
         )

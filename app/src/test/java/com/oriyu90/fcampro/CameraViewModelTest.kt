@@ -16,6 +16,7 @@ import com.oriyu90.fcampro.ui.ExposureComp
 import com.oriyu90.fcampro.ui.LensCapabilities
 import com.oriyu90.fcampro.ui.ManualExposure
 import com.oriyu90.fcampro.ui.SaveFormat
+import com.oriyu90.fcampro.ui.dedupeLenses
 import com.oriyu90.fcampro.ui.formatStorageGb
 import com.oriyu90.fcampro.ui.ZoomRatios
 import org.junit.Assert.assertEquals
@@ -336,6 +337,45 @@ class CameraViewModelTest {
         assertEquals("--", formatStorageGb(-1L))
         assertEquals("0.0 GB", formatStorageGb(0L))
         assertEquals("12.4 GB", formatStorageGb(12_400_000_000L))
+    }
+
+    @Test
+    fun dedupeLensesDropsSameFocalTwins() {
+        fun lens(id: String, type: com.oriyu90.fcampro.ui.CameraLensType, focal: Float) =
+            com.oriyu90.fcampro.ui.CameraLensInfo(
+                id = id,
+                type = type,
+                focalLength = focal,
+                isFront = false,
+                capabilities = LensCapabilities(
+                    supportsManualSensor = true,
+                    isoRange = 100..800,
+                    exposureRangeNs = 1L..100L,
+                    minFocusDistance = 0f,
+                    awbModes = listOf(1),
+                    hasFlash = false,
+                    maxZoomRatio = 4f,
+                    exposureCompRange = -6..6,
+                    exposureCompStep = 0.5f,
+                    highSpeedVideo = null,
+                    rawCapability = null,
+                    apertures = emptyList(),
+                ),
+                logicalCameraId = "0",
+                physicalCameraId = if (id == "0") null else id,
+            )
+        val out =
+            dedupeLenses(
+                listOf(
+                    lens("0", com.oriyu90.fcampro.ui.CameraLensType.WIDE, 5.4f),
+                    // Same-focal physical twin: dropped.
+                    lens("p1", com.oriyu90.fcampro.ui.CameraLensType.WIDE, 5.4f),
+                    lens("p2", com.oriyu90.fcampro.ui.CameraLensType.TELEPHOTO, 8.0f),
+                    // Distinct focal: kept.
+                    lens("p3", com.oriyu90.fcampro.ui.CameraLensType.TELEPHOTO, 9.0f),
+                )
+            )
+        assertEquals(listOf("0", "p2", "p3"), out.map { it.id })
     }
 
     @Test

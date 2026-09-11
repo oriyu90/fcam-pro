@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 enum class CameraLensType { ULTRAWIDE, WIDE, TELEPHOTO, MACRO, FRONT }
 
@@ -238,20 +239,26 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     caps?.contains(
                         CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_BACKWARD_COMPATIBLE
                     ) ?: true
-                // Depth-only / IR-only / measurement cameras cannot back a preview or
-                // capture use case; binding them throws. Skip them.
-                if (!backwardCompatible) continue
+                // Depth-only cameras cannot back a preview or capture use case;
+                // binding them throws. Anything else (including non-backward-
+                // compatible auxiliaries such as standalone telephoto logical
+                // cameras on Galaxy devices) is kept — the bind path degrades
+                // gracefully if a use case turns out unsupported.
+                val depthOnly =
+                    caps?.contains(
+                        CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_DEPTH_OUTPUT
+                    ) == true
+                if (!backwardCompatible && depthOnly) continue
 
                 // The logical camera itself is always a candidate (direct bind).
                 addLensCandidate(
-                    lenses = lenses,
                     id = id,
                     logicalId = id,
                     physicalId = null,
                     chars = chars,
                     logicalFlash =
                         chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false,
-                )
+                )?.let { lenses.add(it) }
 
                 // Sub-cameras hidden behind a logical multi-camera (e.g. Galaxy
                 // telephoto / ultra-wide): not in cameraIdList, reachable only
@@ -266,14 +273,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                             runCatching { manager.getCameraCharacteristics(pid) }.getOrNull()
                                 ?: continue
                         addLensCandidate(
-                            lenses = lenses,
                             id = pid,
                             logicalId = id,
                             physicalId = pid,
                             chars = pchars,
                             logicalFlash =
                                 chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false,
-                        )
+                        )?.let { lenses.add(it) }
                     }
                 }
             }
@@ -281,8 +287,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             Log.e(TAG, "Error detecting lenses", e)
         }
 
+        // Drop logical/physical same-focal twins (e.g. Galaxy main twice).
+        val deduped = dedupeLenses(lenses)
         val sorted =
-            lenses.sortedWith(
+            deduped.sortedWith(
                 compareBy(
                     { it.isFront },
                     { it.type.ordinal },
@@ -521,19 +529,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             else SaveFormat.JPEG
 
         /**
-         * One bindable lens entry. [chars] are the characteristics to probe
-         * (physical characteristics for sub-cameras); flash availability is
-         * always inherited from the logical camera because the flash unit is
-         * shared and physical cameras report none.
+         * One bindable lens entry, or null when it cannot be classified.
+         * [chars] are the characteristics to probe (physical characteristics
+         * for sub-cameras); flash availability is always inherited from the
+         * logical camera because the flash unit is shared and physical
+         * cameras report none.
          */
         fun addLensCandidate(
-            lenses: MutableList<CameraLensInfo>,
             id: String,
             logicalId: String,
             physicalId: String?,
             chars: CameraCharacteristics,
             logicalFlash: Boolean,
-        ) {
+        ): CameraLensInfo? {
             val caps = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
             val facing = chars.get(CameraCharacteristics.LENS_FACING)
             val isFront = facing == CameraCharacteristics.LENS_FACING_FRONT
@@ -541,7 +549,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
             // Logical cameras keep the legacy 4.5mm fallback so a missing table
             // can never yield zero lenses; physicals without one are skipped.
-            val focalLength = focalLengths?.firstOrNull() ?: if (physicalId == null) 4.5f else return
+            val focalLength = focalLengths?.firstOrNull() ?: if (physicalId == null) 4.5f else return null
             val minFocus =
                 chars.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
 
@@ -576,30 +584,28 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)?.toList()
                     ?: emptyList()
 
-            lenses.add(
-                CameraLensInfo(
-                    id = id,
-                    type = type,
-                    focalLength = focalLength,
-                    isFront = isFront,
-                    capabilities =
-                        LensCapabilities(
-                            supportsManualSensor = manualSensor,
-                            isoRange = isoR?.let { it.lower..it.upper },
-                            exposureRangeNs = expR?.let { it.lower..it.upper },
-                            minFocusDistance = minFocus,
-                            awbModes = awb,
-                            hasFlash = logicalFlash,
-                            maxZoomRatio = maxZoom.coerceAtLeast(1f),
-                            exposureCompRange = evRange?.let { it.lower..it.upper },
-                            exposureCompStep = evStep,
-                            highSpeedVideo = bestHighSpeedVideo(chars),
-                            rawCapability = probeRawCapability(chars),
-                            apertures = apertures,
-                        ),
-                    logicalCameraId = logicalId,
-                    physicalCameraId = physicalId,
-                )
+            return CameraLensInfo(
+                id = id,
+                type = type,
+                focalLength = focalLength,
+                isFront = isFront,
+                capabilities =
+                    LensCapabilities(
+                        supportsManualSensor = manualSensor,
+                        isoRange = isoR?.let { it.lower..it.upper },
+                        exposureRangeNs = expR?.let { it.lower..it.upper },
+                        minFocusDistance = minFocus,
+                        awbModes = awb,
+                        hasFlash = logicalFlash,
+                        maxZoomRatio = maxZoom.coerceAtLeast(1f),
+                        exposureCompRange = evRange?.let { it.lower..it.upper },
+                        exposureCompStep = evStep,
+                        highSpeedVideo = bestHighSpeedVideo(chars),
+                        rawCapability = probeRawCapability(chars),
+                        apertures = apertures,
+                    ),
+                logicalCameraId = logicalId,
+                physicalCameraId = physicalId,
             )
         }
 
@@ -653,5 +659,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
             return best
         }
+    }
+}
+
+/**
+ * Drop same-facing / same-type / same-focal (0.5mm buckets) duplicates from a
+ * detected lens list, keeping the first entry (directly bindable cameras sort
+ * first). Pure and unit-testable.
+ */
+internal fun dedupeLenses(input: List<CameraLensInfo>): List<CameraLensInfo> {
+    val seen = mutableSetOf<Triple<Boolean, CameraLensType, Int>>()
+    return input.filter { lens ->
+        seen.add(
+            Triple(lens.isFront, lens.type, (lens.focalLength * 2).roundToInt())
+        )
     }
 }

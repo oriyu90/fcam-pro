@@ -1,5 +1,12 @@
 # Fcam pro — 設計概要と実装状況（v2.2.1＋）
 
+## レンズ認識の修正・bindフォールバック・手動パネル堅牢化（未リリース分、Galaxy報告対応）
+
+- **非BC除外の緩和**: 従来は `BACKWARD_COMPATIBLE` のないカメラを一律除外していたため、Galaxy系の単独望遠論理カメラ等が落ちていた。深度専用（`DEPTH_OUTPUT` かつ非BC）のみ除外し、それ以外は候補に含める。不可の use case は bind フォールバックとエラー通知で吸収する。
+- **重複排除**: 論理カメラと同焦点の物理カメラが並んで 1x・2.5x 等が重複表示されていた。同一向き・種別・焦点（0.5mm バケット）を `dedupeLenses()`（純粋関数、単体テスト済み）で排除し、直接 bind 可を優先。
+- **bind 三段フォールバック（写真系）**: preview＋静止＋QR解析 → preview＋静止 → preview のみ、の順に再試行。従来は一段失敗でカメラ死亡だった。静止 use case なしの bind ではシャッタータップ時に保存失敗を通知（無反応タップの解消）。
+- **手動パネル堅牢化**: HAL が返す変形範囲（空・逆転・単一点・非有限）に `LabeledSlider` が `coerceIn`／`Slider` でクラッシュしうるため、範囲を正規化し、縮退時はスライダーなしの静的行を表示。
+
 ## 物理カメラ対応・ISO原子性・プロUI（未リリース分）
 
 - **物理カメラ列挙（Galaxy 望遠等）**: `cameraIdList` には論理カメラしか出ない端末向けに、`getPhysicalCameraIds()`（API 28+、それ未満は論理のみ）でサブカメラを列挙してレンズ化。`CameraLensInfo` に `logicalCameraId`（セレクタ一致用）＋`physicalCameraId`（`setPhysicalCameraId` 用、直接 bind 可は null）を追加。セレクタは論理 ID で一致させ、Preview／ImageCapture／VideoCapture の各 Builder に物理 ID を適用（API ガード付き）。物理側の特性（焦点距離・手動範囲・RAW・高速・絞り）で能力判定し、フラッシュ可否のみ論理側から継承（共有ユニットのため物理側は報告なし）。同一物理 ID の重複登録を排除し、論理→物理の順でソート。BG 録画サービスも `EXTRA_PHYSICAL_CAMERA_ID` で引き継ぎ。

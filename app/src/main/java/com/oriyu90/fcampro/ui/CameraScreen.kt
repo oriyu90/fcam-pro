@@ -460,9 +460,6 @@ fun CameraScreen(
                     }
                 } else {
                     videoCapture = null
-                    val preview = previewBuilder.build().also {
-                        it.surfaceProvider = previewView.surfaceProvider
-                    }
                     // RAW stills ride on CameraX 1.5 DNG output, which is only
                     // valid in plain PHOTO mode: panorama uses in-memory frames,
                     // timelapse/OTHERS and external requests expect plain JPEG.
@@ -479,34 +476,40 @@ fun CameraScreen(
                         } else {
                             ImageCapture.OUTPUT_FORMAT_JPEG
                         }
-                    val icBuilder =
-                        ImageCapture.Builder()
-                            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                            // Sweep frames must share exposure: a per-frame flash
-                            // would poison the stitch, so panorama never flashes.
-                            .setFlashMode(
-                                if (settings.cameraMode == CameraMode.PANORAMA) {
-                                    ImageCapture.FLASH_MODE_OFF
-                                } else {
-                                    settings.flashMode
-                                }
-                            )
-                            .setResolutionSelector(resolutionSelector)
-                            .setOutputFormat(stillOutputFormat)
-                    lens.physicalCameraId?.let { pid ->
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                            Camera2Interop.Extender(icBuilder).setPhysicalCameraId(pid)
+                    fun buildPreview(): Preview =
+                        previewBuilder.build().also {
+                            it.surfaceProvider = previewView.surfaceProvider
                         }
+                    fun buildStillCapture(): ImageCapture {
+                        val icBuilder =
+                            ImageCapture.Builder()
+                                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                                // Sweep frames must share exposure: a per-frame flash
+                                // would poison the stitch, so panorama never flashes.
+                                .setFlashMode(
+                                    if (settings.cameraMode == CameraMode.PANORAMA) {
+                                        ImageCapture.FLASH_MODE_OFF
+                                    } else {
+                                        settings.flashMode
+                                    }
+                                )
+                                .setResolutionSelector(resolutionSelector)
+                                .setOutputFormat(stillOutputFormat)
+                        lens.physicalCameraId?.let { pid ->
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                Camera2Interop.Extender(icBuilder).setPhysicalCameraId(pid)
+                            }
+                        }
+                        return icBuilder.build()
                     }
-                    val ic = icBuilder.build()
-                    imageCapture = ic
-                    if (settings.cameraMode == CameraMode.PANORAMA) {
-                        // No QR scanning while sweeping; the analyzer would only
-                        // add latency between panorama frames.
-                        qrAnalyzer?.release()
-                        qrAnalyzer = null
-                        provider.bindToLifecycle(lifecycleOwner, selector, preview, ic)
-                    } else {
+                    fun bindFull(pv: Preview, ic: ImageCapture): Camera {
+                        if (settings.cameraMode == CameraMode.PANORAMA) {
+                            // No QR scanning while sweeping; the analyzer would only
+                            // add latency between panorama frames.
+                            qrAnalyzer?.release()
+                            qrAnalyzer = null
+                            return provider.bindToLifecycle(lifecycleOwner, selector, pv, ic)
+                        }
                         val analyzer = QrCodeAnalyzer { value ->
                             val now = System.currentTimeMillis()
                             if (now - lastQrAt > 1500) {
@@ -521,7 +524,32 @@ fun CameraScreen(
                                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                                 .build()
                                 .also { it.setAnalyzer(analysisExecutor, analyzer) }
-                        provider.bindToLifecycle(lifecycleOwner, selector, preview, ic, analysis)
+                        return provider.bindToLifecycle(lifecycleOwner, selector, pv, ic, analysis)
+                    }
+                    // Tiered fallback: exotic HALs may reject the analyzer or even
+                    // the still stream — degrade to preview-only with a working
+                    // viewfinder rather than a dead camera.
+                    runCatching {
+                        val pv = buildPreview()
+                        val ic = buildStillCapture()
+                        imageCapture = ic
+                        bindFull(pv, ic)
+                    }.getOrElse {
+                        qrAnalyzer?.release()
+                        qrAnalyzer = null
+                        runCatching {
+                            val pv = buildPreview()
+                            val ic = buildStillCapture()
+                            imageCapture = ic
+                            provider.bindToLifecycle(lifecycleOwner, selector, pv, ic)
+                        }.getOrElse {
+                            imageCapture = null
+                            provider.bindToLifecycle(
+                                lifecycleOwner,
+                                selector,
+                                buildPreview(),
+                            )
+                        }
                     }
                 }
         } catch (e: Exception) {
@@ -751,7 +779,12 @@ fun CameraScreen(
         // use cases (camera == null). Guard explicitly so a tap can never start
         // a self-timer that silently does nothing.
         if (bgRunning) return
-        val ic = imageCapture ?: return
+        val ic = imageCapture ?: run {
+            // Preview-only fallback bind (tier 3): tell the user instead of
+            // silently swallowing the tap.
+            msg(R.string.snack_photo_failed, "")
+            return
+        }
         // Second tap during the self-timer countdown cancels it.
         if (isCapturing) {
             if (timerJob?.isActive == true) {
@@ -843,7 +876,10 @@ fun CameraScreen(
 
     fun toggleRecording() {
         if (bgRunning) return
-        val vc = videoCapture ?: return
+        val vc = videoCapture ?: run {
+            msg(R.string.snack_video_failed, "")
+            return
+        }
         val current = recording
         if (current != null) {
             current.stop()
@@ -1027,7 +1063,10 @@ fun CameraScreen(
 
     fun startPanorama() {
         if (bgRunning || panoActive) return
-        val ic = imageCapture ?: return
+        val ic = imageCapture ?: run {
+            msg(R.string.snack_panorama_failed, "")
+            return
+        }
         playShutter()
         panoActive = true
         capturePanoFrame(ic)
