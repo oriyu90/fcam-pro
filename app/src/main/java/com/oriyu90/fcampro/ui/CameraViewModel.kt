@@ -10,12 +10,14 @@ import android.util.Log
 import android.util.Range
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.ImageCapture
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.oriyu90.fcampro.core.AppSettings
 import com.oriyu90.fcampro.data.AppDatabase
 import com.oriyu90.fcampro.data.CameraProfile
 import com.oriyu90.fcampro.data.ProfileRepository
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -26,7 +28,7 @@ import kotlinx.coroutines.launch
 
 enum class CameraLensType { ULTRAWIDE, WIDE, TELEPHOTO, MACRO, FRONT }
 
-enum class CameraMode { PHOTO, VIDEO, OTHERS }
+enum class CameraMode { PHOTO, VIDEO, SLOWMO, PANORAMA, OTHERS }
 
 /** Pure zoom-ratio helpers (unit-testable; no Android dependencies). */
 object ZoomRatios {
@@ -40,7 +42,28 @@ object ZoomRatios {
     }
 }
 
+/** Pure exposure-compensation helpers (unit-testable). */
+object ExposureComp {
+    /** Clamp an EV index to the device range; 0 when the lens reports none. */
+    fun clamp(value: Int, range: IntRange?): Int =
+        if (range == null) 0 else value.coerceIn(range.first, range.last)
+
+    /** Display text, e.g. "+1.0 EV". */
+    fun evText(value: Int, step: Float): String =
+        "%+.1f EV".format(Locale.US, value * step)
+}
+
+/** Constrained high-speed video configuration of one physical camera. */
+@Immutable
+data class HighSpeedVideo(
+    val width: Int,
+    val height: Int,
+    val minFps: Int,
+    val maxFps: Int,
+)
+
 /** Manual-control ranges reported by a specific physical camera. */
+@Immutable
 data class LensCapabilities(
     val supportsManualSensor: Boolean,
     val isoRange: IntRange?,
@@ -49,8 +72,15 @@ data class LensCapabilities(
     val awbModes: List<Int>,
     val hasFlash: Boolean,
     val maxZoomRatio: Float,
+    /** AE exposure-compensation index range (null => unsupported). */
+    val exposureCompRange: IntRange?,
+    /** EV step per compensation index (e.g. 1/3 EV). */
+    val exposureCompStep: Float,
+    /** Best high-speed video config (null => slow-motion unsupported). */
+    val highSpeedVideo: HighSpeedVideo?,
 )
 
+@Immutable
 data class CameraLensInfo(
     val id: String,
     val type: CameraLensType,
@@ -59,6 +89,7 @@ data class CameraLensInfo(
     val capabilities: LensCapabilities,
 )
 
+@Immutable
 data class CameraSettings(
     val cameraMode: CameraMode = CameraMode.PHOTO,
     val isManualMode: Boolean = false,
@@ -68,6 +99,8 @@ data class CameraSettings(
     val shutterSpeedNs: Long? = null,
     val focusDistance: Float? = null,
     val whiteBalanceMode: Int? = null,
+    /** AE exposure-compensation index; only meaningful when ISO/shutter are auto. */
+    val exposureCompensation: Int = 0,
     val flashMode: Int = ImageCapture.FLASH_MODE_AUTO,
     val timerSeconds: Int = 0,
     val isFrontCamera: Boolean = false,
@@ -179,6 +212,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
                 val maxZoom =
                     chars.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f
+                val evRange: Range<Int>? =
+                    chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)
+                val evStep =
+                    chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)
+                        ?.toDouble()?.toFloat() ?: 0f
+                val highSpeed = bestHighSpeedVideo(chars)
 
                 lenses.add(
                     CameraLensInfo(
@@ -195,6 +234,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                                 awbModes = awb,
                                 hasFlash = flash,
                                 maxZoomRatio = maxZoom.coerceAtLeast(1f),
+                                exposureCompRange = evRange?.let { it.lower..it.upper },
+                                exposureCompStep = evStep,
+                                highSpeedVideo = highSpeed,
                             ),
                     )
                 )
@@ -223,6 +265,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun currentCapabilities(): LensCapabilities? = _settings.value.currentLens?.capabilities
 
+    /** True when the active lens can record constrained high-speed video. */
+    fun isSlowMotionSupported(): Boolean =
+        currentCapabilities()?.highSpeedVideo?.let { it.maxFps >= MIN_SLOWMO_FPS } ?: false
+
     // --- Mode / simple toggles -------------------------------------------------
 
     fun setMode(mode: CameraMode) {
@@ -230,8 +276,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             _settings.value.copy(
                 cameraMode = mode,
                 // Manual controls only make sense in PHOTO / VIDEO; collapse the panel
-                // when leaving them so OTHERS never shows a stale manual panel.
-                isManualMode = if (mode == CameraMode.OTHERS) false else _settings.value.isManualMode,
+                // when leaving them so other modes never show a stale manual panel.
+                isManualMode =
+                    if (mode == CameraMode.PHOTO || mode == CameraMode.VIDEO) {
+                        _settings.value.isManualMode
+                    } else {
+                        false
+                    },
             )
     }
 
@@ -252,6 +303,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     shutterSpeedNs = null,
                     focusDistance = null,
                     whiteBalanceMode = null,
+                    exposureCompensation = 0,
                 )
         }
     }
@@ -301,6 +353,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 shutterSpeedNs = null,
                 focusDistance = null,
                 whiteBalanceMode = null,
+                exposureCompensation = 0,
             )
     }
 
@@ -331,6 +384,25 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             )
     }
 
+    /** AE exposure-compensation index, clamped to the active lens range. */
+    fun updateExposureCompensation(ev: Int) {
+        _settings.value =
+            _settings.value.copy(
+                exposureCompensation = ExposureComp.clamp(ev, currentCapabilities()?.exposureCompRange)
+            )
+    }
+
+    fun resetManualSettings() {
+        _settings.value =
+            _settings.value.copy(
+                iso = null,
+                shutterSpeedNs = null,
+                focusDistance = null,
+                whiteBalanceMode = null,
+                exposureCompensation = 0,
+            )
+    }
+
     // --- Profiles ------------------------------------------------------------
 
     fun saveProfile(name: String) {
@@ -344,6 +416,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     shutterSpeedNs = s.shutterSpeedNs,
                     focusDistance = s.focusDistance,
                     whiteBalanceMode = s.whiteBalanceMode,
+                    exposureCompensation = s.exposureCompensation,
                 )
             )
         }
@@ -365,9 +438,39 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             profile.focusDistance,
             profile.whiteBalanceMode,
         )
+        updateExposureCompensation(profile.exposureCompensation)
     }
 
     private companion object {
         const val TAG = "CameraViewModel"
+
+        /** Minimum high-speed fps that counts as slow-motion capable (2x of 30fps). */
+        const val MIN_SLOWMO_FPS = 60
+
+        /**
+         * Best constrained high-speed video config, or null when the camera has none.
+         * Prefers the highest frame rate, then the largest frame area.
+         */
+        fun bestHighSpeedVideo(chars: CameraCharacteristics): HighSpeedVideo? {
+            val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                ?: return null
+            var best: HighSpeedVideo? = null
+            for (size in map.highSpeedVideoSizes ?: return null) {
+                val ranges = map.getHighSpeedVideoFpsRangesFor(size) ?: continue
+                for (r in ranges) {
+                    val candidate =
+                        HighSpeedVideo(size.width, size.height, r.lower, r.upper)
+                    val current = best
+                    if (current == null ||
+                        candidate.maxFps > current.maxFps ||
+                        (candidate.maxFps == current.maxFps &&
+                            candidate.width * candidate.height > current.width * current.height)
+                    ) {
+                        best = candidate
+                    }
+                }
+            }
+            return best
+        }
     }
 }

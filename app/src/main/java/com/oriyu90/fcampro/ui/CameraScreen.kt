@@ -2,12 +2,19 @@ package com.oriyu90.fcampro.ui
 
 import android.content.ContentValues
 import android.content.Intent
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.hardware.camera2.CaptureRequest
 import android.media.MediaActionSound
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
+import android.util.Range
 import androidx.camera.camera2.interop.Camera2CameraControl
+import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.CaptureRequestOptions
@@ -18,6 +25,7 @@ import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
@@ -124,13 +132,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.oriyu90.fcampro.R
+import com.oriyu90.fcampro.camera.PanoEstimate
+import com.oriyu90.fcampro.camera.PanoramaStitcher
+import com.oriyu90.fcampro.camera.SlowMoFactors
+import com.oriyu90.fcampro.camera.SlowMoProcessor
+import com.oriyu90.fcampro.camera.YuvConverter
 import com.oriyu90.fcampro.core.AppSettings
 import com.oriyu90.fcampro.data.CameraProfile
 import com.oriyu90.fcampro.services.BackgroundCameraService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
+import kotlin.math.abs
 
 /** Describes an OS "capture and return" request (ACTION_IMAGE_CAPTURE / ACTION_VIDEO_CAPTURE). */
 data class ExternalCaptureSpec(val isVideo: Boolean, val outputUri: Uri?)
@@ -174,6 +189,15 @@ fun CameraScreen(
     var lastQrAt by remember { mutableStateOf(0L) }
     var timelapseActive by remember { mutableStateOf(false) }
     var isCapturing by remember { mutableStateOf(false) }
+    // Slow-motion post-processing (timestamp stretch) runs after recording stops.
+    var slowMoProcessing by remember { mutableStateOf(false) }
+    // Panorama sweep session: frames accumulate here until finish/cancel.
+    var panoActive by remember { mutableStateOf(false) }
+    var panoFrames by remember { mutableStateOf<List<android.graphics.Bitmap>>(emptyList()) }
+    var panoFrameInFlight by remember { mutableStateOf(false) }
+    var panoAzimuth by remember { mutableStateOf<Float?>(null) }
+    var currentAzimuth by remember { mutableStateOf<Float?>(null) }
+    var lastPanoCaptureAt by remember { mutableStateOf(0L) }
 
     val appSnapshot by appSettings.state.collectAsState()
     var batteryPct by remember { mutableStateOf<Int?>(null) }
@@ -350,32 +374,63 @@ fun CameraScreen(
                 )
                 .build()
 
-        val preview =
-            Preview.Builder().setResolutionSelector(resolutionSelector).build().also {
-                it.surfaceProvider = previewView.surfaceProvider
-            }
+        val previewBuilder = Preview.Builder().setResolutionSelector(resolutionSelector)
 
         try {
             camera =
-                if (settings.cameraMode == CameraMode.VIDEO) {
+                if (settings.cameraMode == CameraMode.VIDEO ||
+                    settings.cameraMode == CameraMode.SLOWMO
+                ) {
                     // Tear down photo-mode use cases so the ML Kit scanner and the stale
                     // ImageCapture reference are not retained while recording.
                     qrAnalyzer?.release()
                     qrAnalyzer = null
                     imageCapture = null
+                    val qualities =
+                        if (settings.cameraMode == CameraMode.SLOWMO) {
+                            // High-speed sensors top out at modest resolutions; prefer HD.
+                            listOf(Quality.HD, Quality.SD)
+                        } else {
+                            listOf(Quality.FHD, Quality.HD, Quality.SD)
+                        }
                     val recorder =
                         Recorder.Builder()
-                            .setQualitySelector(
-                                QualitySelector.fromOrderedList(
-                                    listOf(Quality.FHD, Quality.HD, Quality.SD)
-                                )
-                            )
+                            .setQualitySelector(QualitySelector.fromOrderedList(qualities))
                             .build()
-                    val vc = VideoCapture.withOutput(recorder)
+                    val vcBuilder = VideoCapture.Builder(recorder)
+                    val hs =
+                        if (settings.cameraMode == CameraMode.SLOWMO) {
+                            settings.currentLens?.capabilities?.highSpeedVideo
+                        } else {
+                            null
+                        }
+                    if (hs != null) {
+                        // Request a fixed high frame rate on both streams; the HAL
+                        // falls back to the closest supported range when the exact
+                        // value is unavailable.
+                        val fpsRange = Range(hs.maxFps, hs.maxFps)
+                        Camera2Interop.Extender(vcBuilder)
+                            .setCaptureRequestOption(
+                                CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                                fpsRange,
+                            )
+                        Camera2Interop.Extender(previewBuilder)
+                            .setCaptureRequestOption(
+                                CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                                fpsRange,
+                            )
+                    }
+                    val preview = previewBuilder.build().also {
+                        it.surfaceProvider = previewView.surfaceProvider
+                    }
+                    val vc = vcBuilder.build()
                     videoCapture = vc
                     provider.bindToLifecycle(lifecycleOwner, selector, preview, vc)
                 } else {
                     videoCapture = null
+                    val preview = previewBuilder.build().also {
+                        it.surfaceProvider = previewView.surfaceProvider
+                    }
                     val ic =
                         ImageCapture.Builder()
                             .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
@@ -383,21 +438,29 @@ fun CameraScreen(
                             .setResolutionSelector(resolutionSelector)
                             .build()
                     imageCapture = ic
-                    val analyzer = QrCodeAnalyzer { value ->
-                        val now = System.currentTimeMillis()
-                        if (now - lastQrAt > 1500) {
-                            lastQrAt = now
-                            detectedQr = value
+                    if (settings.cameraMode == CameraMode.PANORAMA) {
+                        // No QR scanning while sweeping; the analyzer would only
+                        // add latency between panorama frames.
+                        qrAnalyzer?.release()
+                        qrAnalyzer = null
+                        provider.bindToLifecycle(lifecycleOwner, selector, preview, ic)
+                    } else {
+                        val analyzer = QrCodeAnalyzer { value ->
+                            val now = System.currentTimeMillis()
+                            if (now - lastQrAt > 1500) {
+                                lastQrAt = now
+                                detectedQr = value
+                            }
                         }
+                        qrAnalyzer?.release()
+                        qrAnalyzer = analyzer
+                        val analysis =
+                            ImageAnalysis.Builder()
+                                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                                .build()
+                                .also { it.setAnalyzer(analysisExecutor, analyzer) }
+                        provider.bindToLifecycle(lifecycleOwner, selector, preview, ic, analysis)
                     }
-                    qrAnalyzer?.release()
-                    qrAnalyzer = analyzer
-                    val analysis =
-                        ImageAnalysis.Builder()
-                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                            .build()
-                            .also { it.setAnalyzer(analysisExecutor, analyzer) }
-                    provider.bindToLifecycle(lifecycleOwner, selector, preview, ic, analysis)
                 }
         } catch (e: Exception) {
             Log.e(TAG, "bind failed", e)
@@ -451,6 +514,7 @@ fun CameraScreen(
         settings.shutterSpeedNs,
         settings.focusDistance,
         settings.whiteBalanceMode,
+        settings.exposureCompensation,
         camera,
     ) {
         val cam = camera ?: return@LaunchedEffect
@@ -487,6 +551,17 @@ fun CameraScreen(
                     b.setCaptureRequestOption(
                         android.hardware.camera2.CaptureRequest.CONTROL_AE_LOCK,
                         true,
+                    )
+                }
+            }
+
+            if (!manualExposure) {
+                // AE is running: apply exposure compensation (neutral 0 is a no-op).
+                val evRange = settings.currentLens?.capabilities?.exposureCompRange
+                if (evRange != null) {
+                    b.setCaptureRequestOption(
+                        android.hardware.camera2.CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION,
+                        ExposureComp.clamp(settings.exposureCompensation, evRange),
                     )
                 }
             }
@@ -643,6 +718,10 @@ fun CameraScreen(
             }
             return
         }
+        if (settings.cameraMode == CameraMode.SLOWMO && !viewModel.isSlowMotionSupported()) {
+            msg(R.string.snack_slowmo_unsupported)
+            return
+        }
         if (appSettings.shutterSound) mediaActionSound.play(MediaActionSound.START_VIDEO_RECORDING)
 
         // Always record to the shared MediaStore. For an external VIDEO_CAPTURE request
@@ -685,11 +764,34 @@ fun CameraScreen(
                             val uri = event.outputResults.outputUri
                             if (external != null) {
                                 onExternalResult(ok, Intent().setData(uri))
-                            } else if (ok) {
-                                if (uri != null) viewModel.setLastMedia(uri, isVideo = true)
-                                msg(R.string.snack_video_saved)
-                            } else {
+                            } else if (!ok || uri == null) {
                                 msg(R.string.snack_video_failed, event.error.toString())
+                            } else if (settings.cameraMode == CameraMode.SLOWMO) {
+                                // Stretch the high-fps recording into slow motion.
+                                slowMoProcessing = true
+                                msg(R.string.snack_slowmo_processing)
+                                scope.launch(Dispatchers.IO) {
+                                    val fps =
+                                        settings.currentLens?.capabilities?.highSpeedVideo?.maxFps
+                                            ?: SlowMoFactors.BASE_FPS
+                                    val out =
+                                        SlowMoProcessor.convertToSlowMotion(
+                                            context,
+                                            uri,
+                                            fps,
+                                            "Fcam-slowmo-${System.currentTimeMillis()}.mp4",
+                                        )
+                                    slowMoProcessing = false
+                                    if (out != null) {
+                                        viewModel.setLastMedia(out, isVideo = true)
+                                        msg(R.string.snack_video_saved)
+                                    } else {
+                                        msg(R.string.snack_video_failed, "")
+                                    }
+                                }
+                            } else {
+                                viewModel.setLastMedia(uri, isVideo = true)
+                                msg(R.string.snack_video_saved)
                             }
                         }
                     }
@@ -698,6 +800,150 @@ fun CameraScreen(
                     msg(R.string.snack_video_failed, it.message ?: "")
                     null
                 }
+    }
+
+    // --- Panorama sweep session --------------------------------------
+    fun recyclePanoFrames() {
+        panoFrames.forEach { runCatching { it.recycle() } }
+        panoFrames = emptyList()
+        panoAzimuth = null
+    }
+
+    fun cancelPanorama() {
+        panoActive = false
+        panoFrameInFlight = false
+        recyclePanoFrames()
+    }
+
+    fun finishPanorama() {
+        if (!panoActive) return
+        panoActive = false
+        val frames = panoFrames
+        panoFrames = emptyList()
+        panoAzimuth = null
+        if (frames.size < 2) {
+            if (frames.isNotEmpty()) msg(R.string.snack_panorama_need_frames)
+            frames.forEach { runCatching { it.recycle() } }
+            return
+        }
+        isCapturing = true
+        scope.launch(Dispatchers.Default) {
+            val stitched = runCatching { PanoramaStitcher.stitch(frames) }.getOrNull()
+            frames.forEach { runCatching { it.recycle() } }
+            if (stitched == null) {
+                isCapturing = false
+                msg(R.string.snack_panorama_failed, "")
+                return@launch
+            }
+            val uri =
+                saveBitmapToGallery(
+                    context,
+                    stitched,
+                    "Fcam-pano-${System.currentTimeMillis()}.jpg",
+                )
+            runCatching { stitched.recycle() }
+            isCapturing = false
+            if (uri != null) {
+                viewModel.setLastMedia(uri, isVideo = false)
+                msg(R.string.snack_photo_saved)
+            } else {
+                msg(R.string.snack_panorama_failed, "")
+            }
+        }
+    }
+
+    fun capturePanoFrame(ic: ImageCapture) {
+        if (panoFrameInFlight || panoFrames.size >= PanoEstimate.MAX_FRAMES) return
+        panoFrameInFlight = true
+        ic.takePicture(
+            ContextCompat.getMainExecutor(context),
+            object : ImageCapture.OnImageCapturedCallback() {
+                override fun onCaptureSuccess(image: ImageProxy) {
+                    val bmp = YuvConverter.imageProxyToBitmap(image)
+                    image.close()
+                    scope.launch(Dispatchers.Default) {
+                        val frame =
+                            bmp?.let { PanoramaStitcher.downscaleToMaxWidth(it) }
+                        if (frame != null && frame !== bmp) bmp.recycle()
+                        if (frame != null) {
+                            panoFrames = panoFrames + frame
+                            currentAzimuth?.let { panoAzimuth = it }
+                            lastPanoCaptureAt = System.currentTimeMillis()
+                            if (panoFrames.size >= PanoEstimate.MAX_FRAMES) finishPanorama()
+                        }
+                        panoFrameInFlight = false
+                    }
+                }
+
+                override fun onError(e: ImageCaptureException) {
+                    panoFrameInFlight = false
+                    msg(R.string.snack_photo_failed, e.message ?: "")
+                }
+            },
+        )
+    }
+
+    fun startPanorama() {
+        if (bgRunning || panoActive) return
+        val ic = imageCapture ?: return
+        playShutter()
+        panoActive = true
+        capturePanoFrame(ic)
+    }
+
+    fun togglePanorama() {
+        if (bgRunning || isCapturing || slowMoProcessing) return
+        if (panoActive) finishPanorama() else startPanorama()
+    }
+
+    // --- Panorama yaw tracking (rotation vector; no permission needed) ---
+    val sensorManager = remember { context.getSystemService(SensorManager::class.java) }
+    if (panoActive) {
+        DisposableEffect(Unit) {
+            val sensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+            val listener =
+                object : SensorEventListener {
+                    override fun onSensorChanged(e: SensorEvent) {
+                        val r = FloatArray(9)
+                        val o = FloatArray(3)
+                        SensorManager.getRotationMatrixFromVector(r, e.values)
+                        SensorManager.getOrientation(r, o)
+                        currentAzimuth = Math.toDegrees(o[0].toDouble()).toFloat()
+                    }
+
+                    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+                }
+            if (sensor != null) {
+                sensorManager?.registerListener(
+                    listener,
+                    sensor,
+                    SensorManager.SENSOR_DELAY_UI,
+                )
+            }
+            onDispose { sensorManager?.unregisterListener(listener) }
+        }
+    }
+
+    LaunchedEffect(currentAzimuth) {
+        val az = currentAzimuth ?: return@LaunchedEffect
+        if (!panoActive || panoFrameInFlight) return@LaunchedEffect
+        val lastAz = panoAzimuth
+        if (lastAz == null) {
+            panoAzimuth = az
+            return@LaunchedEffect
+        }
+        val ic = imageCapture ?: return@LaunchedEffect
+        if (panoFrames.size in 1 until PanoEstimate.MAX_FRAMES &&
+            abs(PanoEstimate.yawDelta(lastAz, az)) >= PanoEstimate.CAPTURE_STEP_DEG &&
+            System.currentTimeMillis() - lastPanoCaptureAt >= PanoEstimate.MIN_CAPTURE_INTERVAL_MS
+        ) {
+            capturePanoFrame(ic)
+        }
+    }
+
+    // Leaving panorama mode discards the in-progress sweep.
+    LaunchedEffect(settings.cameraMode) {
+        if (settings.cameraMode != CameraMode.PANORAMA && panoActive) cancelPanorama()
     }
 
     fun openGallery() {
@@ -783,9 +1029,13 @@ fun CameraScreen(
                         .pointerInput(camera, settings.isManualMode, settings.focusDistance, focusLocked) {
                             detectTapGestures { offset -> onPreviewTap(offset) }
                         }
-                        .pointerInput(camera) {
+                        .pointerInput(camera, settings.cameraMode) {
                             detectTransformGestures { _, _, zoom, _ ->
-                                if (zoom == 1f) return@detectTransformGestures
+                                // Fixed framing while sweeping a panorama; zoom would
+                                // invalidate the assumed frame overlap.
+                                if (zoom == 1f || settings.cameraMode == CameraMode.PANORAMA) {
+                                    return@detectTransformGestures
+                                }
                                 val cam = camera ?: return@detectTransformGestures
                                 // Refresh the upper bound when the camera reports one;
                                 // otherwise keep the post-bind fallback.
@@ -883,6 +1133,10 @@ fun CameraScreen(
                 }
             }
 
+            if (settings.cameraMode == CameraMode.PANORAMA) {
+                PanoramaGuideFrame()
+            }
+
             CameraOverlay(
                 viewModel = viewModel,
                 settings = settings,
@@ -891,7 +1145,7 @@ fun CameraScreen(
                 external = external,
                 bgRunning = bgRunning,
                 timelapseActive = timelapseActive,
-                isCapturing = isCapturing,
+                isCapturing = isCapturing || slowMoProcessing,
                 isRecording = recording != null,
                 gridOn = appSnapshot.gridLines,
                 mediaThumb = thumb,
@@ -920,8 +1174,11 @@ fun CameraScreen(
                         msg(R.string.snack_timelapse_stopped)
                     }
                 },
-                onSlowMo = { msg(R.string.snack_slowmo_unsupported) },
-                onPanorama = { msg(R.string.snack_panorama_unsupported) },
+                panoActive = panoActive,
+                panoCount = panoFrames.size,
+                panoMax = PanoEstimate.MAX_FRAMES,
+                onTogglePanorama = ::togglePanorama,
+                onCancelPanorama = ::cancelPanorama,
                 onToggleBackground = {
                     if (bgRunning) {
                         BackgroundCameraService.stop(context)
@@ -1036,6 +1293,66 @@ private fun captureForExternal(
                 }
             },
         )
+    }
+}
+
+/** Sweep guide rails + hint shown only in panorama mode. */
+@Composable
+private fun PanoramaGuideFrame() {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+        Text(
+            text = stringResource(R.string.pano_hint),
+            color = Color.White,
+            style = MaterialTheme.typography.labelMedium,
+            modifier =
+                Modifier.windowInsetsPadding(WindowInsets.safeDrawing)
+                    .padding(top = 116.dp, start = 16.dp, end = 16.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+        )
+    }
+    Canvas(Modifier.fillMaxSize()) {
+        val c = Color.White.copy(alpha = 0.5f)
+        val stroke = 2.dp.toPx()
+        for (fx in listOf(0.12f, 0.88f)) {
+            val x = size.width * fx
+            drawLine(
+                c,
+                androidx.compose.ui.geometry.Offset(x, size.height * 0.08f),
+                androidx.compose.ui.geometry.Offset(x, size.height * 0.92f),
+                stroke,
+            )
+        }
+    }
+}
+
+private fun saveBitmapToGallery(
+    context: android.content.Context,
+    bmp: android.graphics.Bitmap,
+    displayName: String,
+): Uri? {
+    val values =
+        ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Fcam pro")
+            }
+        }
+    val resolver = context.contentResolver
+    val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+        ?: return null
+    return try {
+        resolver.openOutputStream(uri)?.use { out ->
+            if (!bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 92, out)) {
+                throw java.io.IOException("compress failed")
+            }
+        } ?: throw java.io.IOException("open failed")
+        uri
+    } catch (e: Exception) {
+        Log.e(TAG, "save bitmap failed", e)
+        runCatching { resolver.delete(uri, null, null) }
+        null
     }
 }
 

@@ -3,6 +3,8 @@ package com.oriyu90.fcampro.ui
 import android.content.res.Configuration
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.ImageCapture
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -24,7 +26,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyRow
@@ -94,6 +95,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.oriyu90.fcampro.R
@@ -129,8 +131,11 @@ fun CameraOverlay(
     onCapturePhoto: () -> Unit,
     onToggleRecording: () -> Unit,
     onToggleTimelapse: () -> Unit,
-    onSlowMo: () -> Unit,
-    onPanorama: () -> Unit,
+    panoActive: Boolean,
+    panoCount: Int,
+    panoMax: Int,
+    onTogglePanorama: () -> Unit,
+    onCancelPanorama: () -> Unit,
     onToggleBackground: () -> Unit,
     onOpenSettings: () -> Unit,
     onCancelExternal: () -> Unit,
@@ -182,8 +187,11 @@ fun CameraOverlay(
             onCapturePhoto = onCapturePhoto,
             onToggleRecording = onToggleRecording,
             onToggleTimelapse = onToggleTimelapse,
-            onSlowMo = onSlowMo,
-            onPanorama = onPanorama,
+            panoActive = panoActive,
+            panoCount = panoCount,
+            panoMax = panoMax,
+            onTogglePanorama = onTogglePanorama,
+            onCancelPanorama = onCancelPanorama,
             onToggleBackground = onToggleBackground,
             onOpenSettings = onOpenSettings,
         )
@@ -239,11 +247,26 @@ private class SharedActions(
     val onCapturePhoto: () -> Unit,
     val onToggleRecording: () -> Unit,
     val onToggleTimelapse: () -> Unit,
-    val onSlowMo: () -> Unit,
-    val onPanorama: () -> Unit,
+    val panoActive: Boolean,
+    val panoCount: Int,
+    val panoMax: Int,
+    val onTogglePanorama: () -> Unit,
+    val onCancelPanorama: () -> Unit,
     val onToggleBackground: () -> Unit,
     val onOpenSettings: () -> Unit,
-)
+) {
+    /** Central shutter dispatch shared by every layout. */
+    fun onShutter() {
+        when (settings.cameraMode) {
+            CameraMode.VIDEO, CameraMode.SLOWMO -> onToggleRecording()
+            CameraMode.PANORAMA -> onTogglePanorama()
+            else -> onCapturePhoto()
+        }
+    }
+
+    fun isRecordMode(): Boolean =
+        settings.cameraMode == CameraMode.VIDEO || settings.cameraMode == CameraMode.SLOWMO
+}
 
 // ============================ PHONE PORTRAIT ============================
 
@@ -263,11 +286,167 @@ private fun PhonePortrait(s: SharedActions) {
         Column(
             modifier =
                 Modifier.fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.5f))
+                    .background(Color.Black.copy(alpha = 0.72f))
                     .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(12.dp)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
-            PanelBody(s = s, verticalTabs = false, othersTwoPerRow = false)
+            if (s.settings.isManualMode && isStillMode(s.settings.cameraMode)) {
+                ManualPanel(s.viewModel, s.settings, s.profiles)
+            }
+            if (s.settings.cameraMode == CameraMode.PANORAMA) {
+                PanoProgressRow(s)
+            } else {
+                // Pinch-zoom pill only once zoomed, so the idle view stays clean.
+                if (s.zoomRatio > 1.01f) {
+                    ZoomPill(
+                        zoomRatio = s.zoomRatio,
+                        maxZoom = s.maxZoom,
+                        enabled = !s.bgRunning,
+                        onReset = s.onResetZoom,
+                    )
+                }
+                LensZoomPills(
+                    lenses = s.availableLenses.filter { it.isFront == s.settings.isFrontCamera },
+                    current = s.settings.currentLens,
+                    enabled = !s.isRecording && !s.bgRunning,
+                    onSelect = { s.viewModel.setLens(it) },
+                )
+            }
+            IphoneModeTabs(s)
+            ShutterBar(s)
+        }
+    }
+}
+
+/** PHOTO / VIDEO VAL still-photo modes share the manual panel. */
+private fun isStillMode(mode: CameraMode): Boolean =
+    mode == CameraMode.PHOTO || mode == CameraMode.VIDEO
+
+/** Bottom shutter bar: thumbnail | large shutter | front-back switch. */
+@Composable
+private fun ShutterBar(s: SharedActions) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        MediaThumbButton(s.mediaThumb, s.hasMedia, s.onOpenGallery, size = 48.dp)
+        ShutterButton(
+            isVideo = s.isRecordMode(),
+            isRecording = s.isRecording,
+            isCapturing = s.isCapturing,
+            enabled = !s.bgRunning,
+            size = 78.dp,
+            onClick = { s.onShutter() },
+        )
+        FrontBackButton(s)
+    }
+}
+
+/** Per-lens zoom pills ("×0.5" / "×1" / "×2") relative to the wide lens. */
+@Composable
+private fun LensZoomPills(
+    lenses: List<CameraLensInfo>,
+    current: CameraLensInfo?,
+    enabled: Boolean,
+    onSelect: (CameraLensInfo) -> Unit,
+) {
+    if (lenses.size <= 1) return
+    val base =
+        lenses.firstOrNull { it.type == CameraLensType.WIDE }?.focalLength
+            ?: lenses.minOf { it.focalLength }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        lenses.forEach { lens ->
+            val selected = current?.id == lens.id
+            val ratio = lens.focalLength / base.coerceAtLeast(0.1f)
+            val label =
+                if (kotlin.math.abs(ratio - 1f) < 0.05f) "×1"
+                else "×%.1f".format(ratio)
+            Box(
+                modifier =
+                    Modifier.size(44.dp)
+                        .clip(CircleShape)
+                        .background(if (selected) Color.White else Color.White.copy(alpha = 0.16f))
+                        .clickable(enabled = enabled) { onSelect(lens) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    label,
+                    color =
+                        if (selected) Color.Black
+                        else Color.White.copy(alpha = if (enabled) 1f else 0.4f),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/** iPhone-style centered mode selector. */
+@Composable
+private fun IphoneModeTabs(s: SharedActions) {
+    LazyRow(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        items(MODES, key = { it.first }) { (mode, res) ->
+            val selected = s.settings.cameraMode == mode
+            Text(
+                stringResource(res),
+                color = if (selected) Color.White else Color.White.copy(alpha = 0.55f),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                maxLines = 1,
+                modifier = Modifier.clickable { s.viewModel.setMode(mode) }.padding(vertical = 6.dp),
+            )
+        }
+    }
+}
+
+/** Panorama sweep progress + finish/cancel, shown above the mode tabs. */
+@Composable
+private fun PanoProgressRow(s: SharedActions) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (s.panoActive) {
+            Text(
+                stringResource(R.string.pano_progress, s.panoCount, s.panoMax),
+                color = Color.White,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.width(12.dp))
+            TextButton(onClick = s.onTogglePanorama) {
+                Text(
+                    stringResource(R.string.pano_stop),
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            TextButton(onClick = s.onCancelPanorama) {
+                Text(
+                    stringResource(R.string.action_cancel),
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+        } else {
+            Text(
+                stringResource(R.string.pano_hint),
+                color = Color.White.copy(alpha = 0.75f),
+                style = MaterialTheme.typography.labelSmall,
+            )
         }
     }
 }
@@ -303,10 +482,20 @@ private fun SidePanelLayout(
                     else -> Alignment.BottomStart
                 }
             val side = !allowGravity
+            // The manual panel needs room: widen into the empty area while it is
+            // open so sliders and profiles stay usable on large screens.
+            val manualVisible =
+                shared.settings.isManualMode && isStillMode(shared.settings.cameraMode)
+            val panelWidth by
+                animateDpAsState(
+                    targetValue = if (manualVisible) 460.dp else 300.dp,
+                    label = "panelWidth",
+                )
             Column(
                 modifier =
                     Modifier.align(panelAlign)
-                        .widthIn(max = 380.dp)
+                        .width(panelWidth)
+                        .animateContentSize()
                         .then(if (side) Modifier.fillMaxHeight() else Modifier.wrapContentHeight())
                         .background(Color.Black.copy(alpha = 0.6f))
                         .windowInsetsPadding(WindowInsets.safeDrawing)
@@ -400,14 +589,11 @@ private fun androidx.compose.foundation.layout.BoxScope.CollapsedCluster(
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FrontBackButton(s)
             ShutterButton(
-                isVideo = s.settings.cameraMode == CameraMode.VIDEO,
+                isVideo = s.isRecordMode(),
                 isRecording = s.isRecording,
                 isCapturing = s.isCapturing,
                 enabled = !s.bgRunning,
-                onClick = {
-                    if (s.settings.cameraMode == CameraMode.VIDEO) s.onToggleRecording()
-                    else s.onCapturePhoto()
-                },
+                onClick = { s.onShutter() },
             )
         }
         BatteryPill(s.batteryPct)
@@ -418,8 +604,7 @@ private fun androidx.compose.foundation.layout.BoxScope.CollapsedCluster(
 
 @Composable
 private fun PanelBody(s: SharedActions, verticalTabs: Boolean, othersTwoPerRow: Boolean) {
-    val photoOrVideo =
-        s.settings.cameraMode == CameraMode.PHOTO || s.settings.cameraMode == CameraMode.VIDEO
+    val photoOrVideo = isStillMode(s.settings.cameraMode)
 
     if (s.settings.isManualMode && photoOrVideo) {
         ManualPanel(s.viewModel, s.settings, s.profiles)
@@ -447,6 +632,17 @@ private fun PanelBody(s: SharedActions, verticalTabs: Boolean, othersTwoPerRow: 
     Box(Modifier.fillMaxWidth().heightIn(min = 96.dp), contentAlignment = Alignment.Center) {
         if (s.settings.cameraMode == CameraMode.OTHERS) {
             OthersMenu(s = s, twoPerRow = othersTwoPerRow)
+        } else if (s.settings.cameraMode == CameraMode.PANORAMA) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                PanoProgressRow(s)
+                ShutterButton(
+                    isVideo = false,
+                    isRecording = false,
+                    isCapturing = s.isCapturing,
+                    enabled = !s.bgRunning,
+                    onClick = { s.onShutter() },
+                )
+            }
         } else {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -454,14 +650,11 @@ private fun PanelBody(s: SharedActions, verticalTabs: Boolean, othersTwoPerRow: 
             ) {
                 FrontBackButton(s)
                 ShutterButton(
-                    isVideo = s.settings.cameraMode == CameraMode.VIDEO,
+                    isVideo = s.isRecordMode(),
                     isRecording = s.isRecording,
                     isCapturing = s.isCapturing,
                     enabled = !s.bgRunning,
-                    onClick = {
-                        if (s.settings.cameraMode == CameraMode.VIDEO) s.onToggleRecording()
-                        else s.onCapturePhoto()
-                    },
+                    onClick = { s.onShutter() },
                 )
                 BatteryPill(s.batteryPct)
             }
@@ -483,8 +676,7 @@ private fun PanelBody(s: SharedActions, verticalTabs: Boolean, othersTwoPerRow: 
 
 @Composable
 private fun ControlIcons(s: SharedActions, columns: Int, modifier: Modifier = Modifier) {
-    val photoOrVideo =
-        s.settings.cameraMode == CameraMode.PHOTO || s.settings.cameraMode == CameraMode.VIDEO
+    val photoOrVideo = isStillMode(s.settings.cameraMode)
     val caps = s.settings.currentLens?.capabilities
 
     val icons = buildList<@Composable () -> Unit> {
@@ -682,11 +874,16 @@ private fun ZoomPill(zoomRatio: Float, maxZoom: Float, enabled: Boolean, onReset
 }
 
 @Composable
-private fun MediaThumbButton(thumb: ImageBitmap?, hasMedia: Boolean, onClick: () -> Unit) {
+private fun MediaThumbButton(
+    thumb: ImageBitmap?,
+    hasMedia: Boolean,
+    onClick: () -> Unit,
+    size: Dp = 56.dp,
+) {
     val cd = stringResource(R.string.cd_latest_capture)
     Box(
         modifier =
-            Modifier.size(56.dp)
+            Modifier.size(size)
                 .semantics { contentDescription = cd }
                 .clip(RoundedCornerShape(10.dp))
                 .background(Color.White.copy(alpha = if (hasMedia) 0.18f else 0.06f))
@@ -758,6 +955,8 @@ private val MODES =
     listOf(
         CameraMode.PHOTO to R.string.tab_photo,
         CameraMode.VIDEO to R.string.tab_video,
+        CameraMode.SLOWMO to R.string.tab_slowmo,
+        CameraMode.PANORAMA to R.string.tab_panorama,
         CameraMode.OTHERS to R.string.tab_others,
     )
 
@@ -813,14 +1012,14 @@ private fun OthersMenu(s: SharedActions, twoPerRow: Boolean) {
             OthersMenuItem(
                 Icons.Default.SlowMotionVideo,
                 stringResource(R.string.others_slowmo),
-                s.onSlowMo,
+                onClick = { s.viewModel.setMode(CameraMode.SLOWMO) },
             )
         }
         add {
             OthersMenuItem(
                 Icons.Default.PanoramaHorizontal,
                 stringResource(R.string.others_panorama),
-                s.onPanorama,
+                onClick = { s.viewModel.setMode(CameraMode.PANORAMA) },
             )
         }
         add {
@@ -883,6 +1082,7 @@ private fun ShutterButton(
     isRecording: Boolean,
     isCapturing: Boolean,
     enabled: Boolean = true,
+    size: Dp = 72.dp,
     onClick: () -> Unit,
 ) {
     val cd =
@@ -895,7 +1095,7 @@ private fun ShutterButton(
         )
     Box(
         modifier =
-            Modifier.size(72.dp)
+            Modifier.size(size)
                 .semantics { contentDescription = cd }
                 .clip(CircleShape)
                 .background(if (isCapturing || !enabled) Color.Gray else Color.White)
@@ -904,12 +1104,12 @@ private fun ShutterButton(
     ) {
         if (isVideo) {
             Box(
-                Modifier.size(26.dp)
+                Modifier.size(size * 0.36f)
                     .clip(if (isRecording) RoundedCornerShape(4.dp) else CircleShape)
                     .background(Color.Red)
             )
         } else {
-            Box(Modifier.size(62.dp).clip(CircleShape).background(Color.LightGray))
+            Box(Modifier.size(size * 0.86f).clip(CircleShape).background(Color.LightGray))
         }
     }
 }
@@ -976,12 +1176,13 @@ private fun ManualPanel(
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             TextButton(
-                onClick = { update(null, null, null, null) },
+                onClick = { viewModel.resetManualSettings() },
                 enabled =
                     settings.iso != null ||
                         settings.shutterSpeedNs != null ||
                         settings.focusDistance != null ||
-                        settings.whiteBalanceMode != null,
+                        settings.whiteBalanceMode != null ||
+                        settings.exposureCompensation != 0,
             ) {
                 Text(stringResource(R.string.manual_all_auto))
             }
@@ -1015,6 +1216,25 @@ private fun ManualPanel(
                 update(settings.iso, it.toLong(), settings.focusDistance, settings.whiteBalanceMode)
             },
         )
+
+        // Exposure compensation appears directly below the exposure controls,
+        // but only while exposure itself is fully auto (ISO + speed unset).
+        // With AE_MODE_OFF the compensation index is ignored by the HAL, so
+        // showing it then would promise an adjustment that never applies.
+        if (settings.iso == null && settings.shutterSpeedNs == null) {
+            val evRange = caps.exposureCompRange
+            if (evRange != null) {
+                val evStep = caps.exposureCompStep.takeIf { it > 0f } ?: (1f / 3f)
+                LabeledSlider(
+                    label = stringResource(R.string.label_ev),
+                    valueText = ExposureComp.evText(settings.exposureCompensation, evStep),
+                    value = settings.exposureCompensation.toFloat(),
+                    range = evRange.first.toFloat()..evRange.last.toFloat(),
+                    steps = (evRange.last - evRange.first - 1).coerceAtLeast(0),
+                    onChange = { viewModel.updateExposureCompensation(it.roundToInt()) },
+                )
+            }
+        }
 
         val focusMax = caps.minFocusDistance.takeIf { it > 0f } ?: 10f
         LabeledSlider(

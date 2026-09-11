@@ -44,6 +44,8 @@
     <string name="label_wb">WB</string>
     <string name="label_shutter_volume">Shutter volume</string>
     <string name="label_mic">Mic</string>
+    <string name="label_ev">EV comp</string>
+    <string name="ev_value">%+.1f EV</string>
     <string name="value_auto">Auto</string>
     <string name="mic_mono">Mono</string>
     <string name="mic_stereo">Stereo</string>
@@ -66,6 +68,8 @@
     <!-- Mode tabs -->
     <string name="tab_photo">PHOTO</string>
     <string name="tab_video">VIDEO</string>
+    <string name="tab_slowmo">SLO-MO</string>
+    <string name="tab_panorama">PANO</string>
     <string name="tab_others">OTHERS</string>
 
     <!-- OTHERS menu -->
@@ -91,8 +95,13 @@
     <string name="snack_bg_record_stopped">Background recording stopped</string>
     <string name="snack_bg_record_unsupported">Background recording is not supported on this device</string>
     <string name="snack_qr_copied">QR content copied to clipboard</string>
-    <string name="snack_slowmo_unsupported">Slow-motion capture is not available in this version</string>
-    <string name="snack_panorama_unsupported">Panorama capture is not available in this version</string>
+    <string name="snack_slowmo_unsupported">Slow-motion recording is not supported on this device</string>
+    <string name="snack_slowmo_processing">Processing slow-motion video…</string>
+    <string name="snack_panorama_failed">Could not save panorama: %1$s</string>
+    <string name="snack_panorama_need_frames">Need at least 2 frames — keep panning, then stop</string>
+    <string name="pano_hint">Tap capture, then pan slowly sideways</string>
+    <string name="pano_progress">%1$d / %2$d</string>
+    <string name="pano_stop">Finish</string>
     <string name="snack_lens_switch_failed">Could not switch to that lens</string>
     <string name="snack_no_media">No captured photos or videos yet</string>
     <string name="snack_open_failed">Could not open that app</string>

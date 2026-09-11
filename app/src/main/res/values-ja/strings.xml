@@ -44,6 +44,8 @@
     <string name="label_wb">WB</string>
     <string name="label_shutter_volume">シャッター音量</string>
     <string name="label_mic">マイク</string>
+    <string name="label_ev">露出補正</string>
+    <string name="ev_value">%+.1f EV</string>
     <string name="value_auto">オート</string>
     <string name="mic_mono">モノラル</string>
     <string name="mic_stereo">ステレオ</string>
@@ -66,6 +68,8 @@
     <!-- モードタブ -->
     <string name="tab_photo">写真</string>
     <string name="tab_video">動画</string>
+    <string name="tab_slowmo">スロー</string>
+    <string name="tab_panorama">パノラマ</string>
     <string name="tab_others">その他</string>
 
     <!-- その他メニュー -->
@@ -91,8 +95,13 @@
     <string name="snack_bg_record_stopped">バックグラウンド録画を停止しました</string>
     <string name="snack_bg_record_unsupported">この端末はバックグラウンド録画に対応していません</string>
     <string name="snack_qr_copied">QR の内容をクリップボードにコピーしました</string>
-    <string name="snack_slowmo_unsupported">このバージョンではスローモーション撮影を利用できません</string>
-    <string name="snack_panorama_unsupported">このバージョンではパノラマ撮影を利用できません</string>
+    <string name="snack_slowmo_unsupported">この端末はスローモーション撮影に対応していません</string>
+    <string name="snack_slowmo_processing">スローモーション動画を処理中…</string>
+    <string name="snack_panorama_failed">パノラマを保存できませんでした: %1$s</string>
+    <string name="snack_panorama_need_frames">2枚以上必要です — パンを続けてから終了してください</string>
+    <string name="pano_hint">撮影後にゆっくり横へパンしてください</string>
+    <string name="pano_progress">%1$d / %2$d</string>
+    <string name="pano_stop">終了</string>
     <string name="snack_lens_switch_failed">そのレンズに切り替えできませんでした</string>
     <string name="snack_no_media">まだ撮影した写真・動画がありません</string>
     <string name="snack_open_failed">アプリを開けませんでした</string>

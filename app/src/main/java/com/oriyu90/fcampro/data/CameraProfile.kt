@@ -11,5 +11,8 @@ data class CameraProfile(
     val shutterSpeedNs: Long?,
     val focusDistance: Float?,
     val whiteBalanceMode: Int?,
+    // AE exposure-compensation index (0 = neutral). v1 -> v2 migration adds
+    // this column with DEFAULT 0, so existing rows survive the upgrade.
+    val exposureCompensation: Int = 0,
     val timestamp: Long = System.currentTimeMillis(),
 )
