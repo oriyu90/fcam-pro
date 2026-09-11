@@ -166,6 +166,9 @@ fun CameraScreen(
     var recording by remember { mutableStateOf<Recording?>(null) }
     var camera by remember { mutableStateOf<Camera?>(null) }
     var zoomRatio by remember { mutableFloatStateOf(1f) }
+    // Upper bound for pinch zoom. Refreshed from the bound Camera after every
+    // (re)bind; falls back to the selected lens capabilities until then.
+    var maxZoomRatio by remember { mutableFloatStateOf(1f) }
 
     var detectedQr by remember { mutableStateOf<String?>(null) }
     var lastQrAt by remember { mutableStateOf(0L) }
@@ -317,7 +320,6 @@ fun CameraScreen(
         }
 
         runCatching { provider.unbindAll() }
-        zoomRatio = 1f
         focusLocked = false
         focusPoint = null
 
@@ -401,6 +403,23 @@ fun CameraScreen(
             Log.e(TAG, "bind failed", e)
             camera = null
             msg(R.string.snack_camera_setup_failed, e.message ?: "")
+        }
+
+        // Startup / rebind contract: both the UI state and the physical camera
+        // start at 1.0x. ProcessCameraProvider may hand back the same Camera
+        // instance for the same selector, so an explicit setZoomRatio is required
+        // — resetting only the local state would leave the lens zoomed while the
+        // UI claims 1.0x.
+        val bound = camera
+        if (bound != null) {
+            zoomRatio = 1f
+            maxZoomRatio =
+                (bound.cameraInfo.zoomState.value?.maxZoomRatio
+                    ?: lens.capabilities.maxZoomRatio).coerceAtLeast(1f)
+            runCatching { bound.cameraControl.setZoomRatio(1f) }
+        } else {
+            zoomRatio = 1f
+            maxZoomRatio = lens.capabilities.maxZoomRatio.coerceAtLeast(1f)
         }
     }
 
@@ -550,6 +569,10 @@ fun CameraScreen(
     }
 
     fun capturePhoto() {
+        // While the background service owns the camera, this screen has no bound
+        // use cases (camera == null). Guard explicitly so a tap can never start
+        // a self-timer that silently does nothing.
+        if (bgRunning) return
         val ic = imageCapture ?: return
         // Second tap during the self-timer countdown cancels it.
         if (isCapturing) {
@@ -609,6 +632,7 @@ fun CameraScreen(
     }
 
     fun toggleRecording() {
+        if (bgRunning) return
         val vc = videoCapture ?: return
         val current = recording
         if (current != null) {
@@ -732,6 +756,12 @@ fun CameraScreen(
         }
     }
 
+    // Zoom pill "tap to reset": restores 1.0x on both UI state and camera.
+    fun resetZoom() {
+        zoomRatio = 1f
+        camera?.let { runCatching { it.cameraControl.setZoomRatio(1f) } }
+    }
+
     // --- QR overlay side effect ---------------------------------------
     val clipboard =
         remember {
@@ -757,11 +787,13 @@ fun CameraScreen(
                             detectTransformGestures { _, _, zoom, _ ->
                                 if (zoom == 1f) return@detectTransformGestures
                                 val cam = camera ?: return@detectTransformGestures
-                                val max =
-                                    cam.cameraInfo.zoomState.value?.maxZoomRatio
-                                        ?: settings.currentLens?.capabilities?.maxZoomRatio
-                                        ?: 1f
-                                zoomRatio = (zoomRatio * zoom).coerceIn(1f, maxOf(1f, max))
+                                // Refresh the upper bound when the camera reports one;
+                                // otherwise keep the post-bind fallback.
+                                cam.cameraInfo.zoomState.value?.maxZoomRatio?.let {
+                                    maxZoomRatio = it.coerceAtLeast(1f)
+                                }
+                                zoomRatio =
+                                    ZoomRatios.next(zoomRatio, zoom, maxZoomRatio)
                                 runCatching { cam.cameraControl.setZoomRatio(zoomRatio) }
                             }
                         },
@@ -865,6 +897,9 @@ fun CameraScreen(
                 mediaThumb = thumb,
                 hasMedia = lastMedia != null,
                 batteryPct = batteryPct,
+                zoomRatio = zoomRatio,
+                maxZoom = maxZoomRatio,
+                onResetZoom = ::resetZoom,
                 panelCollapsed = appSnapshot.panelCollapsed,
                 panelGravity = appSnapshot.panelGravity,
                 onSetPanelCollapsed = { appSettings.panelCollapsed = it },
@@ -901,7 +936,14 @@ fun CameraScreen(
                     ) {
                         msg(R.string.snack_bg_record_no_permission)
                     } else {
-                        BackgroundCameraService.start(context, lensFront = settings.isFrontCamera)
+                        BackgroundCameraService.start(
+                            context,
+                            lensFront = settings.isFrontCamera,
+                            cameraId = settings.currentLens?.id,
+                            targetRotation =
+                                previewView.display?.rotation
+                                    ?: android.view.Surface.ROTATION_0,
+                        )
                         msg(R.string.snack_bg_record_started)
                     }
                 },

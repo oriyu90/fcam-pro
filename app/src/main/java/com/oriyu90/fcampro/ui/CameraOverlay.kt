@@ -117,6 +117,9 @@ fun CameraOverlay(
     mediaThumb: ImageBitmap?,
     hasMedia: Boolean,
     batteryPct: Int?,
+    zoomRatio: Float,
+    maxZoom: Float,
+    onResetZoom: () -> Unit,
     panelCollapsed: Boolean,
     panelGravity: Int,
     onSetPanelCollapsed: (Boolean) -> Unit,
@@ -142,6 +145,7 @@ fun CameraOverlay(
             settings = settings,
             isRecording = isRecording,
             isCapturing = isCapturing,
+            shutterEnabled = !bgRunning,
             onCapturePhoto = onCapturePhoto,
             onToggleRecording = onToggleRecording,
             onCancel = onCancelExternal,
@@ -170,6 +174,9 @@ fun CameraOverlay(
             mediaThumb = mediaThumb,
             hasMedia = hasMedia,
             batteryPct = batteryPct,
+            zoomRatio = zoomRatio,
+            maxZoom = maxZoom,
+            onResetZoom = onResetZoom,
             onToggleGrid = onToggleGrid,
             onOpenGallery = onOpenGallery,
             onCapturePhoto = onCapturePhoto,
@@ -224,6 +231,9 @@ private class SharedActions(
     val mediaThumb: ImageBitmap?,
     val hasMedia: Boolean,
     val batteryPct: Int?,
+    val zoomRatio: Float,
+    val maxZoom: Float,
+    val onResetZoom: () -> Unit,
     val onToggleGrid: () -> Unit,
     val onOpenGallery: () -> Unit,
     val onCapturePhoto: () -> Unit,
@@ -393,6 +403,7 @@ private fun androidx.compose.foundation.layout.BoxScope.CollapsedCluster(
                 isVideo = s.settings.cameraMode == CameraMode.VIDEO,
                 isRecording = s.isRecording,
                 isCapturing = s.isCapturing,
+                enabled = !s.bgRunning,
                 onClick = {
                     if (s.settings.cameraMode == CameraMode.VIDEO) s.onToggleRecording()
                     else s.onCapturePhoto()
@@ -415,11 +426,20 @@ private fun PanelBody(s: SharedActions, verticalTabs: Boolean, othersTwoPerRow: 
     }
 
     val lenses = s.availableLenses.filter { it.isFront == s.settings.isFrontCamera }
+    // Pinch-zoom state is always visible here when the lens supports zoom, so the
+    // current ratio is discoverable and one tap restores the 1.0x startup state.
+    // While the background service owns the camera the pill is shown disabled.
+    ZoomPill(
+        zoomRatio = s.zoomRatio,
+        maxZoom = s.maxZoom,
+        enabled = !s.bgRunning,
+        onReset = s.onResetZoom,
+    )
     if (lenses.size > 1) {
         LensRow(
             lenses = lenses,
             current = s.settings.currentLens,
-            enabled = !s.isRecording,
+            enabled = !s.isRecording && !s.bgRunning,
             onSelect = { s.viewModel.setLens(it) },
         )
     }
@@ -437,6 +457,7 @@ private fun PanelBody(s: SharedActions, verticalTabs: Boolean, othersTwoPerRow: 
                     isVideo = s.settings.cameraMode == CameraMode.VIDEO,
                     isRecording = s.isRecording,
                     isCapturing = s.isCapturing,
+                    enabled = !s.bgRunning,
                     onClick = {
                         if (s.settings.cameraMode == CameraMode.VIDEO) s.onToggleRecording()
                         else s.onCapturePhoto()
@@ -614,6 +635,49 @@ private fun BatteryPill(pct: Int?) {
             color = if (pct <= 15) MaterialTheme.colorScheme.error else Color.White,
             style = MaterialTheme.typography.labelSmall,
         )
+    }
+}
+
+/** Current pinch-zoom ratio. Hidden when the lens reports no zoom range. */
+@Composable
+private fun ZoomPill(zoomRatio: Float, maxZoom: Float, enabled: Boolean, onReset: () -> Unit) {
+    if (maxZoom <= 1.01f) return
+    val zoomed = zoomRatio > 1.01f
+    val cdZoom = stringResource(R.string.cd_zoom)
+    val cdReset = stringResource(R.string.cd_zoom_reset)
+    Row(
+        modifier =
+            Modifier.fillMaxWidth()
+                .semantics { contentDescription = cdZoom }
+                .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier =
+                Modifier.clip(RoundedCornerShape(16.dp))
+                    .background(
+                        if (zoomed) MaterialTheme.colorScheme.primary
+                        else Color.White.copy(alpha = 0.12f)
+                    )
+                    .clickable(enabled = enabled && zoomed, onClick = onReset)
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .semantics(mergeDescendants = true) {
+                        contentDescription =
+                            if (zoomed) cdReset else cdZoom
+                    },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                stringResource(R.string.zoom_ratio, zoomRatio),
+                color =
+                    if (zoomed) MaterialTheme.colorScheme.onPrimary
+                    else Color.White.copy(alpha = if (enabled) 1f else 0.4f),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (zoomed) FontWeight.Bold else FontWeight.Normal,
+                maxLines = 1,
+            )
+        }
     }
 }
 
@@ -818,6 +882,7 @@ private fun ShutterButton(
     isVideo: Boolean,
     isRecording: Boolean,
     isCapturing: Boolean,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     val cd =
@@ -833,8 +898,8 @@ private fun ShutterButton(
             Modifier.size(72.dp)
                 .semantics { contentDescription = cd }
                 .clip(CircleShape)
-                .background(if (isCapturing) Color.Gray else Color.White)
-                .clickable(enabled = !isCapturing, onClick = onClick),
+                .background(if (isCapturing || !enabled) Color.Gray else Color.White)
+                .clickable(enabled = enabled && !isCapturing, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         if (isVideo) {
@@ -856,6 +921,7 @@ private fun ExternalCaptureBar(
     settings: CameraSettings,
     isRecording: Boolean,
     isCapturing: Boolean,
+    shutterEnabled: Boolean,
     onCapturePhoto: () -> Unit,
     onToggleRecording: () -> Unit,
     onCancel: () -> Unit,
@@ -877,6 +943,7 @@ private fun ExternalCaptureBar(
                 isVideo = settings.cameraMode == CameraMode.VIDEO,
                 isRecording = isRecording,
                 isCapturing = isCapturing,
+                enabled = shutterEnabled,
                 onClick = {
                     if (settings.cameraMode == CameraMode.VIDEO) onToggleRecording()
                     else onCapturePhoto()

@@ -28,6 +28,18 @@ enum class CameraLensType { ULTRAWIDE, WIDE, TELEPHOTO, MACRO, FRONT }
 
 enum class CameraMode { PHOTO, VIDEO, OTHERS }
 
+/** Pure zoom-ratio helpers (unit-testable; no Android dependencies). */
+object ZoomRatios {
+    const val MIN = 1f
+
+    /** Next zoom ratio for a pinch factor, clamped to [1, max]. */
+    fun next(current: Float, factor: Float, max: Float): Float {
+        val hi = max.coerceAtLeast(MIN)
+        if (!factor.isFinite() || factor <= 0f) return current.coerceIn(MIN, hi)
+        return (current * factor).coerceIn(MIN, hi)
+    }
+}
+
 /** Manual-control ranges reported by a specific physical camera. */
 data class LensCapabilities(
     val supportsManualSensor: Boolean,

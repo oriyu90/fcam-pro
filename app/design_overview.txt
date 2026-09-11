@@ -1,4 +1,19 @@
-# Fcam pro — 設計概要と実装状況（v2.0.0）
+# Fcam pro — 設計概要と実装状況（v2.1.0）
+
+## v2.1.0 の変更点（ズームUI・起動時1倍保証・バックグラウンド録画の安全性）
+
+- **ズームUI表示**: 操作パネル上部に現在のズーム倍率ピルを追加（`ZoomPill`）。ズーム対応レンズ（maxZoom > 1）のときのみ表示。ズーム中は強調色＋太字、タップで 1.0x にリセット（UI 状態と `cameraControl.setZoomRatio(1f)` の両方）。日英完全対応（`zoom_ratio` / `cd_zoom_reset` を `values/` と `values-ja/` に追加）。
+- **起動時ズーム初期化の保証**: bind 成功後に `zoomRatio = 1f`＋`maxZoomRatio` 更新＋`setZoomRatio(1f)` を明示実行。従来はローカル状態のみ 1f に戻しており、`ProcessCameraProvider` が同一 `Camera` インスタンスを返す場合にレンズ側ズームが残留する論理ミスがあった（UI は 1.0x 表示なのに画角がズームされたまま）。ピンチ上限は bind 直後の `zoomState.maxZoomRatio` を保持し、ジェスチャ時は `ZoomRatios.next()`（単体テスト済み）でクランプ。
+- **バックグラウンド録画の安全性**:
+  - 連続タップの二重起動ガード（`startPending`＋`removeCallbacksAndMessages`）。従来は 350ms 以内の 2 回目の start が 2 つ目の bind をキューし、`recording` を上書きして 1 つ目の `Recording` をリークした。
+  - FGS タイプを用途別に（起動時は CAMERA のみ、音声あり録画時のみ CAMERA|MICROPHONE）。従来は常時 MIC 付きで、音声なし設定・マイク権限なしの端末では Android 14+ で起動失敗した。
+  - 使用中のレンズ ID と画面回転を引き継ぎ（`EXTRA_CAMERA_ID` / `EXTRA_TARGET_ROTATION`、対応不可時は従来の前面/背面既定にフォールバック）。従来は望遠・マクロ選択中も広角既定に戻っていた。
+  - 通知 largeIcon をキャッシュ（毎秒 `decodeResource` していたメモリ churn を解消）。`ExperimentalCamera2Interop` の OptIn をサービスクラスに付与（lint エラー解消）。
+- **録画中の誤操作防止**: BG 録画中はシャッター・レンズ切替を無効化（`camera == null` のため無反応だったタップに明示の disabled 表示）。外部キャプチャバーも同様。`capturePhoto` / `toggleRecording` に `bgRunning` ガードを追加。
+- **表記統一**: OTHERS の「Bg record / 背面録画」を「BG record / BG録画」に（「背面」はリアカメラと紛らわしいため）。
+- 破壊的変更なし。versionCode 5 / versionName 2.1.0。
+
+---
 
 ## v2.0.0 の変更点（操作パネルの再設計）
 
@@ -63,7 +78,7 @@ versionCode 4 / versionName 2.0.0。
 - AndroidX AppCompat の per-app locale（アプリ内言語切替）
 - LifecycleService + フォアグラウンドサービス（バックグラウンド録画）
 - compileSdk 36 / minSdk 24 / targetSdk 36。追加 API は全て SDK_INT でガード。
-- パッケージ: com.oriyu90.fcampro / applicationId 同じ / versionCode 1 / versionName 1.0.0
+- パッケージ: com.oriyu90.fcampro / applicationId 同じ / versionCode 5 / versionName 2.1.0
 
 ## 2. 実装済み機能
 
@@ -87,7 +102,7 @@ versionCode 4 / versionName 2.0.0。
 | 設定画面 | 言語、既定アスペクト比、既定タイマー、タイムラプス間隔、シャッター音、バックグラウンド音声、バージョン、開発者サイト等へのリンク |
 | UI | 固定ダークテーマ。エッジトゥエッジ（safeDrawing インセット）。縦画面は縦積み、横画面・幅 600dp 以上は右サイドの縦レール。キャプチャボタンに contentDescription |
 
-## 3. 既知の制約（v1.0.0）
+## 3. 既知の制約（v2.1.0 時点で継続）
 
 - バックグラウンド録画はプロセス生存が前提（画面オフ・アプリバックグラウンドは可）。タスク除去・プロセス終了で停止。完全デタッチの無制限録画は対象外。
 - スローモーション / パノラマは OTHERS に UI エントリのみ。実処理は未実装（将来枠）。High-Speed Capture Session / OpenCV スティッチングが必要。

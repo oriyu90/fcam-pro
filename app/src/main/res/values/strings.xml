@@ -21,6 +21,8 @@
     <string name="cd_stop_recording">Stop recording</string>
     <string name="cd_qr_detected">QR code detected</string>
     <string name="cd_zoom">Zoom</string>
+    <string name="zoom_ratio">%.1fx</string>
+    <string name="cd_zoom_reset">Reset zoom to 1x</string>
     <string name="cd_grid">Grid lines</string>
     <string name="cd_gallery">View captured photos and videos</string>
     <string name="cd_latest_capture">Open the latest photo or video</string>
@@ -71,8 +73,8 @@
     <string name="others_timelapse_stop">Stop</string>
     <string name="others_slowmo">Slow-mo</string>
     <string name="others_panorama">Panorama</string>
-    <string name="others_bg_record">Bg record</string>
-    <string name="others_bg_record_stop">Stop bg</string>
+    <string name="others_bg_record">BG record</string>
+    <string name="others_bg_record_stop">Stop BG</string>
     <string name="others_settings">Settings</string>
 
     <!-- Snackbars / status -->

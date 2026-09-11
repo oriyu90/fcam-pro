@@ -21,6 +21,8 @@
     <string name="cd_stop_recording">録画を停止</string>
     <string name="cd_qr_detected">QR コードを検出しました</string>
     <string name="cd_zoom">ズーム</string>
+    <string name="zoom_ratio">%.1f倍</string>
+    <string name="cd_zoom_reset">ズームを1倍に戻す</string>
     <string name="cd_grid">グリッド線</string>
     <string name="cd_gallery">撮影した写真・動画を見る</string>
     <string name="cd_latest_capture">最新の写真・動画を開く</string>
@@ -71,8 +73,8 @@
     <string name="others_timelapse_stop">停止</string>
     <string name="others_slowmo">スローモーション</string>
     <string name="others_panorama">パノラマ</string>
-    <string name="others_bg_record">背面録画</string>
-    <string name="others_bg_record_stop">背面停止</string>
+    <string name="others_bg_record">BG録画</string>
+    <string name="others_bg_record_stop">BG停止</string>
     <string name="others_settings">設定</string>
 
     <!-- スナックバー／状態 -->

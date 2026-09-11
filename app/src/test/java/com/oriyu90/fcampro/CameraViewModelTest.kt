@@ -8,6 +8,7 @@ import com.oriyu90.fcampro.ui.CameraLensInfo
 import com.oriyu90.fcampro.ui.CameraLensType
 import com.oriyu90.fcampro.ui.CameraViewModel
 import com.oriyu90.fcampro.ui.LensCapabilities
+import com.oriyu90.fcampro.ui.ZoomRatios
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -130,5 +131,16 @@ class CameraViewModelTest {
         assertEquals(false, vm.lastMedia.value?.isVideo)
         vm.setLastMedia(uri, isVideo = true)
         assertEquals(true, vm.lastMedia.value?.isVideo)
+    }
+
+    @Test
+    fun zoomNextClampsToUnitAndMax() {
+        assertEquals(1f, ZoomRatios.next(1f, 0.5f, 8f))
+        assertEquals(2f, ZoomRatios.next(1f, 2f, 8f))
+        assertEquals(8f, ZoomRatios.next(4f, 3f, 8f))
+        assertEquals(1f, ZoomRatios.next(1f, 2f, 1f))
+        // Non-finite / non-positive factors never change the ratio.
+        assertEquals(2f, ZoomRatios.next(2f, Float.NaN, 8f))
+        assertEquals(2f, ZoomRatios.next(2f, 0f, 8f))
     }
 }

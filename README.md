@@ -15,12 +15,12 @@ localized Japanese / English interface.
 
 | Area | What you get |
 |---|---|
-| Capture | Photo & video, 4:3 / 16:9, self-timer (0/3/10 s), flash auto/on/off, rule-of-thirds grid, tap to lock / unlock focus, pinch-to-zoom, one-tap jump to the system gallery |
+| Capture | Photo & video, 4:3 / 16:9, self-timer (0/3/10 s), flash auto/on/off, rule-of-thirds grid, tap to lock / unlock focus, pinch-to-zoom with an on-screen ratio pill (tap to reset to 1.0x; camera and UI always start at 1.0x), one-tap jump to the system gallery |
 | Manual controls | ISO, shutter speed, focus distance and white balance — every slider is clamped to the ranges the selected physical camera actually reports, and each one (or all at once) can be set back to Auto |
 | Lenses | Ultra-wide / wide / tele / macro / front — binds the real `cameraId`; an always-visible switcher row in photo and video mode |
 | Adaptive UI | Phone-portrait keeps the compact stacked layout; ≥600 dp portrait shows a floating left panel with two-column icons, vertical mode tabs and top/center/bottom alignment; landscape shows a right side-rail. The panel collapses to a draggable shutter + battery + "expand" cluster |
 | Profiles | Save, rename, delete and re-apply manual setups (Room database, survives reinstall-safe destructive migration) |
-| OTHERS | Time-lapse (configurable 1–10 s interval, auto-stop on repeated errors), background video recording via a foreground service with an elapsed-time notification, QR detection with open / copy |
+| OTHERS | Time-lapse (configurable 1–10 s interval, auto-stop on repeated errors), background video recording via a foreground service with an elapsed-time notification (continues the active lens, disabled shutter/lens UI while running), QR detection with open / copy |
 | System integration | Registers for `IMAGE_CAPTURE` / `VIDEO_CAPTURE` / `STILL_IMAGE_CAMERA`, so it can be set as the OS default camera app and returns results to the caller |
 | Localization | English (default) and 日本語, switchable in-app; initial value follows the device locale |
 | Safety | Fixed dark theme, edge-to-edge insets, every camera path wrapped with error reporting, no crash on unsupported hardware |
@@ -81,7 +81,7 @@ app/src/main/java/com/oriyu90/fcampro/
     └── theme/               # fixed dark Material 3 theme
 ```
 
-## Known limitations (v2.0.0)
+## Known limitations (v2.1.0)
 
 - Background recording continues while the process is alive (screen off / app
   backgrounded). Fully detached indefinite recording is out of scope.
@@ -106,13 +106,13 @@ MIT — see [LICENSE](LICENSE). Author: **Yuki_Orita** (折田悠希 / おりた
 
 ### 主な機能
 
-- 写真／動画、4:3・16:9、セルフタイマー（0/3/10 秒）、フラッシュ、三分割グリッド、タップでフォーカス固定／解除、ピンチズーム、標準ギャラリーへのワンタップ遷移
+- 写真／動画、4:3・16:9、セルフタイマー（0/3/10 秒）、フラッシュ、三分割グリッド、タップでフォーカス固定／解除、ピンチズーム（画面に倍率表示、タップで1倍にリセット。起動時はUI・カメラとも必ず1倍）、標準ギャラリーへのワンタップ遷移
 - ISO・シャッター速度・フォーカス距離・ホワイトバランスのマニュアル制御
   （各スライダーは選択中の物理カメラが報告する範囲に自動でクランプ。各項目・一括でオートに戻せる）
 - 超広角／広角／望遠／マクロ／前面レンズを実 `cameraId` で切り替え（写真・動画モードで常時表示の選択行）
 - 画面に応じた操作パネル: スマホ縦は従来の縦積み、≥600dp 縦は左に浮くパネル（アイコン 2 列・縦タブ・上/中央/下寄せ）、横向きは右のサイドバー。パネルは開閉でき、閉じるとシャッター＋バッテリー＋展開ボタンだけの移動可能なクラスタになる
 - マニュアル設定のプロファイル保存・改名・削除・再適用（Room）
-- タイムラプス（間隔 1〜10 秒、連続エラー時に自動停止）、バックグラウンド録画、QR 検出
+- タイムラプス（間隔 1〜10 秒、連続エラー時に自動停止）、バックグラウンド録画（使用中のレンズを引き継ぎ、録画中はシャッター・レンズ切替を無効化）、QR 検出
 - `IMAGE_CAPTURE` / `VIDEO_CAPTURE` に対応し、OS の標準カメラアプリに設定可能
 - 固定ダークテーマ、エッジトゥエッジ対応、カメラ処理は全て例外安全
 

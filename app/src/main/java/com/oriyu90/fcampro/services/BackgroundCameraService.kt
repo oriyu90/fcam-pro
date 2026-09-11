@@ -16,6 +16,8 @@ import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Log
 import androidx.annotation.RequiresPermission
+import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.core.CameraFilter
 import androidx.camera.core.CameraSelector
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.FallbackStrategy
@@ -49,6 +51,7 @@ import kotlinx.coroutines.flow.StateFlow
  * background). It is stopped cleanly if the task is removed or the process dies —
  * fully detached indefinite recording is out of scope.
  */
+@androidx.annotation.OptIn(markerClass = [androidx.camera.camera2.interop.ExperimentalCamera2Interop::class])
 class BackgroundCameraService : LifecycleService() {
 
     private var cameraProvider: ProcessCameraProvider? = null
@@ -57,6 +60,12 @@ class BackgroundCameraService : LifecycleService() {
     private var startedAtElapsed = 0L
     private var tickerJob: Job? = null
     private var lensFront = false
+    private var cameraId: String? = null
+    private var targetRotation: Int = android.view.Surface.ROTATION_0
+    // Guards against two rapid start() calls queuing two bind sequences (the second
+    // would overwrite `recording` and leak the first Recording).
+    private var startPending = false
+    private var largeIconCache: android.graphics.Bitmap? = null
     private val main = Handler(Looper.getMainLooper())
 
     override fun onCreate() {
@@ -65,7 +74,10 @@ class BackgroundCameraService : LifecycleService() {
         // "running" flag if a previous instance was killed without onDestroy.
         _running.value = false
         createChannel()
-        startForegroundSafely(getString(R.string.notif_starting_text))
+        // Minimal type here: CAMERA only. The MICROPHONE type is added later only
+        // when audio is actually enabled (Android 14+ throws if a MIC-typed FGS
+        // runs without the RECORD_AUDIO permission).
+        startForegroundSafely(getString(R.string.notif_starting_text), cameraOnlyTypes())
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -76,6 +88,10 @@ class BackgroundCameraService : LifecycleService() {
         }
 
         lensFront = intent?.getBooleanExtra(EXTRA_LENS_FRONT, false) ?: false
+        cameraId = intent?.getStringExtra(EXTRA_CAMERA_ID)
+        targetRotation =
+            intent?.getIntExtra(EXTRA_TARGET_ROTATION, android.view.Surface.ROTATION_0)
+                ?: android.view.Surface.ROTATION_0
 
         if (
             ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) !=
@@ -88,10 +104,18 @@ class BackgroundCameraService : LifecycleService() {
 
         // Publish running=true synchronously so the Activity's CameraScreen unbinds its
         // own use cases first, then bind the service camera one frame later to avoid a
-        // same-process physical-camera conflict.
-        if (recording == null && !stopping) {
+        // same-process physical-camera conflict. startPending prevents a second rapid
+        // start() from queueing a duplicate bind that would leak a Recording.
+        if (recording == null && !stopping && !startPending) {
             _running.value = true
-            main.postDelayed({ if (!stopping) startRecording() }, 350L)
+            startPending = true
+            main.postDelayed(
+                {
+                    startPending = false
+                    if (!stopping) startRecording()
+                },
+                350L,
+            )
         }
         return START_NOT_STICKY
     }
@@ -122,10 +146,11 @@ class BackgroundCameraService : LifecycleService() {
                         )
                     )
                     .build()
-            val videoCapture = VideoCapture.withOutput(recorder)
-            val selector =
-                if (lensFront) CameraSelector.DEFAULT_FRONT_CAMERA
-                else CameraSelector.DEFAULT_BACK_CAMERA
+            val videoCapture =
+                VideoCapture.withOutput(recorder).also {
+                    runCatching { it.targetRotation = targetRotation }
+                }
+            val selector = resolveSelector()
             provider.bindToLifecycle(this, selector, videoCapture)
             beginRecord(videoCapture)
         } catch (e: Exception) {
@@ -138,6 +163,31 @@ class BackgroundCameraService : LifecycleService() {
                 fail(e.message ?: "bind error")
             }
         }
+    }
+
+    /** Prefer the exact camera the user was on; fall back to front/back default. */
+    private fun resolveSelector(): CameraSelector {
+        val id = cameraId
+        if (id != null) {
+            return CameraSelector.Builder()
+                .requireLensFacing(
+                    if (lensFront) CameraSelector.LENS_FACING_FRONT
+                    else CameraSelector.LENS_FACING_BACK
+                )
+                .addCameraFilter(
+                    CameraFilter { infos ->
+                        val match =
+                            infos.filter {
+                                runCatching { Camera2CameraInfo.from(it).cameraId }.getOrNull() ==
+                                    id
+                            }
+                        if (match.isNotEmpty()) match else infos
+                    }
+                )
+                .build()
+        }
+        return if (lensFront) CameraSelector.DEFAULT_FRONT_CAMERA
+        else CameraSelector.DEFAULT_BACK_CAMERA
     }
 
     private fun beginRecord(videoCapture: VideoCapture<Recorder>) {
@@ -162,6 +212,11 @@ class BackgroundCameraService : LifecycleService() {
             AppSettings.get(this).backgroundAudio &&
                 ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
                     PackageManager.PERMISSION_GRANTED
+
+        // Declare the MICROPHONE foreground-service type only when audio is really
+        // used; otherwise a MIC-typed service without the permission fails to start
+        // on Android 14+.
+        if (wantAudio) startForegroundSafely(getString(R.string.notif_starting_text), micTypes())
 
         try {
             var pending = videoCapture.output.prepareRecording(this, output)
@@ -225,6 +280,8 @@ class BackgroundCameraService : LifecycleService() {
     private fun stopEverything() {
         if (stopping) return
         stopping = true
+        startPending = false
+        main.removeCallbacksAndMessages(null)
         _running.value = false
         tickerJob?.cancel()
         runCatching { recording?.stop() }
@@ -253,12 +310,18 @@ class BackgroundCameraService : LifecycleService() {
 
     // --- notification -------------------------------------------------------
 
-    private fun startForegroundSafely(text: String) {
-        val type =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            else 0
+    private fun cameraOnlyTypes(): Int =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+        else 0
+
+    private fun micTypes(): Int =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        else 0
+
+    private fun startForegroundSafely(text: String, type: Int) {
         try {
             ServiceCompat.startForeground(this, NOTIF_ID, buildNotification(text), type)
         } catch (e: Exception) {
@@ -281,12 +344,8 @@ class BackgroundCameraService : LifecycleService() {
             .setContentTitle(getString(R.string.notif_recording_title))
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setLargeIcon(
-                runCatching {
-                        android.graphics.BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher)
-                    }
-                    .getOrNull()
-            )
+            // Decoded once and reused: buildNotification runs on every ticker tick.
+            .setLargeIcon(getLargeIcon())
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(
@@ -309,6 +368,20 @@ class BackgroundCameraService : LifecycleService() {
             )
             .build()
 
+    private fun getLargeIcon(): android.graphics.Bitmap? {
+        if (largeIconCache == null) {
+            largeIconCache =
+                runCatching {
+                        android.graphics.BitmapFactory.decodeResource(
+                            resources,
+                            R.mipmap.ic_launcher,
+                        )
+                    }
+                    .getOrNull()
+        }
+        return largeIconCache
+    }
+
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel =
@@ -328,14 +401,23 @@ class BackgroundCameraService : LifecycleService() {
         private const val NOTIF_ID = 4211
         const val ACTION_STOP = "com.oriyu90.fcampro.action.STOP_BG_RECORDING"
         const val EXTRA_LENS_FRONT = "com.oriyu90.fcampro.extra.LENS_FRONT"
+        const val EXTRA_CAMERA_ID = "com.oriyu90.fcampro.extra.CAMERA_ID"
+        const val EXTRA_TARGET_ROTATION = "com.oriyu90.fcampro.extra.TARGET_ROTATION"
 
         private val _running = MutableStateFlow(false)
         val running: StateFlow<Boolean> = _running
 
-        fun start(context: Context, lensFront: Boolean = false) {
+        fun start(
+            context: Context,
+            lensFront: Boolean = false,
+            cameraId: String? = null,
+            targetRotation: Int = android.view.Surface.ROTATION_0,
+        ) {
             val intent =
                 Intent(context, BackgroundCameraService::class.java)
                     .putExtra(EXTRA_LENS_FRONT, lensFront)
+                    .putExtra(EXTRA_CAMERA_ID, cameraId)
+                    .putExtra(EXTRA_TARGET_ROTATION, targetRotation)
             ContextCompat.startForegroundService(context, intent)
         }
 
