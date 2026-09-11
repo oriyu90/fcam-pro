@@ -134,6 +134,7 @@ import androidx.core.content.ContextCompat
 import com.oriyu90.fcampro.R
 import com.oriyu90.fcampro.camera.PanoEstimate
 import com.oriyu90.fcampro.camera.PanoramaStitcher
+import com.oriyu90.fcampro.camera.RawSupport
 import com.oriyu90.fcampro.camera.SlowMoFactors
 import com.oriyu90.fcampro.camera.SlowMoProcessor
 import com.oriyu90.fcampro.camera.YuvConverter
@@ -331,6 +332,7 @@ fun CameraScreen(
         settings.cameraMode,
         settings.flashMode,
         settings.aspectRatio,
+        settings.saveFormat,
         bgRunning,
     ) {
         val provider = cameraProvider ?: return@LaunchedEffect
@@ -431,12 +433,29 @@ fun CameraScreen(
                     val preview = previewBuilder.build().also {
                         it.surfaceProvider = previewView.surfaceProvider
                     }
-                    val ic =
+                    // RAW stills ride on CameraX 1.5 DNG output, which is only
+                    // valid in plain PHOTO mode: panorama uses in-memory frames,
+                    // timelapse/OTHERS and external requests expect plain JPEG.
+                    val stillOutputFormat =
+                        if (external == null &&
+                            settings.cameraMode == CameraMode.PHOTO &&
+                            settings.saveFormat != SaveFormat.JPEG &&
+                            lens.capabilities.rawCapability?.supported == true
+                        ) {
+                            when (settings.saveFormat) {
+                                SaveFormat.RAW -> ImageCapture.OUTPUT_FORMAT_RAW
+                                else -> ImageCapture.OUTPUT_FORMAT_RAW_JPEG
+                            }
+                        } else {
+                            ImageCapture.OUTPUT_FORMAT_JPEG
+                        }
+                    val icBuilder =
                         ImageCapture.Builder()
                             .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                             .setFlashMode(settings.flashMode)
                             .setResolutionSelector(resolutionSelector)
-                            .build()
+                            .setOutputFormat(stillOutputFormat)
+                    val ic = icBuilder.build()
                     imageCapture = ic
                     if (settings.cameraMode == CameraMode.PANORAMA) {
                         // No QR scanning while sweeping; the analyzer would only
@@ -643,6 +662,47 @@ fun CameraScreen(
         }
     }
 
+    fun jpegOutputOptions(): ImageCapture.OutputFileOptions {
+        val name = "Fcam-photo-${System.currentTimeMillis()}.jpg"
+        return ImageCapture.OutputFileOptions.Builder(
+                context.contentResolver,
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Fcam pro")
+                    }
+                },
+            )
+            .build()
+    }
+
+    fun rawOutputOptions(): ImageCapture.OutputFileOptions {
+        val name = "Fcam-raw-${System.currentTimeMillis()}${RawSupport.DNG_EXTENSION}"
+        return ImageCapture.OutputFileOptions.Builder(
+                context.contentResolver,
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                    put(MediaStore.MediaColumns.MIME_TYPE, RawSupport.DNG_MIME)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Fcam pro")
+                    }
+                },
+            )
+            .build()
+    }
+
+    /** Order-agnostic saver for single + dual (RAW_JPEG) capture callbacks. */
+    fun onStillSaved(uri: Uri?) {
+        val u = uri ?: return
+        val mime = runCatching { context.contentResolver.getType(u) }.getOrNull()
+        viewModel.setLastMedia(u, isVideo = false)
+        if (mime == RawSupport.DNG_MIME) msg(R.string.snack_raw_saved)
+        else msg(R.string.snack_photo_saved)
+    }
+
     fun capturePhoto() {
         // While the background service owns the camera, this screen has no bound
         // use cases (camera == null). Guard explicitly so a tap can never start
@@ -673,28 +733,60 @@ fun CameraScreen(
                 return@launch
             }
 
-            val name = "Fcam-photo-${System.currentTimeMillis()}.jpg"
-            val opts =
-                ImageCapture.OutputFileOptions.Builder(
-                        context.contentResolver,
-                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                        ContentValues().apply {
-                            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-                            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Fcam pro")
-                            }
-                        },
-                    )
-                    .build()
+            // Mirrors the bind contract: RAW output only in plain PHOTO mode
+            // on a RAW-capable lens; every other path stays plain JPEG.
+            val rawActive =
+                settings.cameraMode == CameraMode.PHOTO &&
+                    settings.saveFormat != SaveFormat.JPEG &&
+                    settings.currentLens?.capabilities?.rawCapability?.supported == true
+            val executor = ContextCompat.getMainExecutor(context)
+            if (!rawActive) {
+                ic.takePicture(
+                    jpegOutputOptions(),
+                    executor,
+                    object : ImageCapture.OnImageSavedCallback {
+                        override fun onImageSaved(r: ImageCapture.OutputFileResults) {
+                            isCapturing = false
+                            onStillSaved(r.savedUri)
+                        }
+
+                        override fun onError(e: ImageCaptureException) {
+                            isCapturing = false
+                            msg(R.string.snack_photo_failed, e.message ?: "")
+                        }
+                    },
+                )
+                return@launch
+            }
+            if (settings.saveFormat == SaveFormat.RAW) {
+                ic.takePicture(
+                    rawOutputOptions(),
+                    executor,
+                    object : ImageCapture.OnImageSavedCallback {
+                        override fun onImageSaved(r: ImageCapture.OutputFileResults) {
+                            isCapturing = false
+                            onStillSaved(r.savedUri)
+                        }
+
+                        override fun onError(e: ImageCaptureException) {
+                            isCapturing = false
+                            msg(R.string.snack_photo_failed, e.message ?: "")
+                        }
+                    },
+                )
+                return@launch
+            }
+            // JPEG + RAW: the callback fires once per file, in either order.
+            var pending = 2
             ic.takePicture(
-                opts,
-                ContextCompat.getMainExecutor(context),
+                rawOutputOptions(),
+                jpegOutputOptions(),
+                executor,
                 object : ImageCapture.OnImageSavedCallback {
                     override fun onImageSaved(r: ImageCapture.OutputFileResults) {
-                        isCapturing = false
-                        r.savedUri?.let { viewModel.setLastMedia(it, isVideo = false) }
-                        msg(R.string.snack_photo_saved)
+                        onStillSaved(r.savedUri)
+                        pending--
+                        if (pending <= 0) isCapturing = false
                     }
 
                     override fun onError(e: ImageCaptureException) {

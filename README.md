@@ -16,7 +16,7 @@ localized Japanese / English interface.
 | Area | What you get |
 |---|---|
 | Capture | Photo, video, slow-motion & panorama, 4:3 / 16:9, self-timer (0/3/10 s), flash auto/on/off, rule-of-thirds grid, tap to lock / unlock focus, pinch-to-zoom with an on-screen ratio pill (tap to reset to 1.0x; camera and UI always start at 1.0x), one-tap jump to the system gallery |
-| Manual controls | ISO, shutter speed, focus distance and white balance — every slider is clamped to the ranges the selected physical camera actually reports, and each one (or all at once) can be set back to Auto. While exposure stays fully auto, an exposure-compensation (EV) slider appears right below the speed control |
+| Manual controls | ISO, shutter speed, focus distance and white balance — every slider is clamped to the ranges the selected physical camera actually reports, and each one (or all at once) can be set back to Auto. While exposure stays fully auto, an exposure-compensation (EV) slider appears right below the speed control. On lenses with sensor-RAW output the save format is selectable: JPEG / JPEG+RAW / RAW (DNG) |
 | Lenses | Ultra-wide / wide / tele / macro / front — binds the real `cameraId`; a zoom-factor pill row (×0.5 / ×1 / ×2 …) in phone mode, switcher row on larger screens |
 | Adaptive UI | Phone-portrait uses a bottom shutter bar (thumbnail | large shutter | front-back switch) with centered zoom pills and a scrollable mode selector; ≥600 dp portrait shows a floating left panel with two-column icons, vertical mode tabs and top/center/bottom alignment — the panel widens while the manual panel is open; landscape shows a right side-rail. The panel collapses to a draggable shutter + battery + "expand" cluster |
 | Profiles | Save, rename, delete and re-apply manual setups (Room database, survives reinstall-safe destructive migration) |
@@ -81,13 +81,18 @@ app/src/main/java/com/oriyu90/fcampro/
     └── theme/               # fixed dark Material 3 theme
 ```
 
-## Known limitations (v2.2.0)
+## Known limitations (v2.3.0)
 
 - Background recording continues while the process is alive (screen off / app
   backgrounded). Fully detached indefinite recording is out of scope.
 - Slow-motion needs a camera with constrained high-speed video (≥60 fps);
   otherwise the shutter reports that the device is unsupported. Slow-mo clips
   are saved silent (audio is dropped during the time-stretch).
+- RAW (DNG) stills ride on CameraX 1.5 `OUTPUT_FORMAT_RAW` / `OUTPUT_FORMAT_RAW_JPEG`,
+  so they need a lens reporting `REQUEST_AVAILABLE_CAPABILITIES_RAW` plus
+  `RAW_SENSOR` stream sizes; JPEG-only lenses hide the format selector.
+  RAW output applies to plain PHOTO mode only (panorama, time-lapse and OS
+  capture requests stay JPEG).
 - Panorama stitching is translation-only with feather blending — scenes with
   strong parallax may show seams.
 - Physical sub-cameras hidden behind a logical multi-camera cannot always be
@@ -112,7 +117,7 @@ MIT — see [LICENSE](LICENSE). Author: **Yuki_Orita** (折田悠希 / おりた
 
 - 写真／動画／スローモーション／パノラマ、4:3・16:9、セルフタイマー（0/3/10 秒）、フラッシュ、三分割グリッド、タップでフォーカス固定／解除、ピンチズーム（画面に倍率表示、タップで1倍にリセット。起動時はUI・カメラとも必ず1倍）、標準ギャラリーへのワンタップ遷移
 - ISO・シャッター速度・フォーカス距離・ホワイトバランスのマニュアル制御
-  （各スライダーは選択中の物理カメラが報告する範囲に自動でクランプ。各項目・一括でオートに戻せる。露出が完全オートの間は速度の下に露出補正スライダーが出る）
+  （各スライダーは選択中の物理カメラが報告する範囲に自動でクランプ。各項目・一括でオートに戻せる。露出が完全オートの間は速度の下に露出補正スライダーが出る。センサーRAW対応レンズでは保存形式を選択可能：JPEG／JPEG+RAW／RAW(DNG)）
 - 超広角／広角／望遠／マクロ／前面レンズを実 `cameraId` で切り替え（写真・動画モードで常時表示の選択行）
 - 画面に応じた操作パネル: スマホ縦は従来の縦積み、≥600dp 縦は左に浮くパネル（アイコン 2 列・縦タブ・上/中央/下寄せ）、横向きは右のサイドバー。パネルは開閉でき、閉じるとシャッター＋バッテリー＋展開ボタンだけの移動可能なクラスタになる
 - マニュアル設定のプロファイル保存・改名・削除・再適用（Room）

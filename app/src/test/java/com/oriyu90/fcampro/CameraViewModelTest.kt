@@ -6,12 +6,15 @@ import androidx.camera.core.ImageCapture
 import androidx.test.core.app.ApplicationProvider
 import com.oriyu90.fcampro.camera.PanoEstimate
 import com.oriyu90.fcampro.camera.PanoramaStitcher
+import com.oriyu90.fcampro.camera.RawCapability
+import com.oriyu90.fcampro.camera.RawSupport
 import com.oriyu90.fcampro.camera.SlowMoFactors
 import com.oriyu90.fcampro.ui.CameraLensInfo
 import com.oriyu90.fcampro.ui.CameraLensType
 import com.oriyu90.fcampro.ui.CameraViewModel
 import com.oriyu90.fcampro.ui.ExposureComp
 import com.oriyu90.fcampro.ui.LensCapabilities
+import com.oriyu90.fcampro.ui.SaveFormat
 import com.oriyu90.fcampro.ui.ZoomRatios
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -83,6 +86,7 @@ class CameraViewModelTest {
                     exposureCompRange = -6..6,
                     exposureCompStep = 1f / 3f,
                     highSpeedVideo = null,
+                    rawCapability = null,
                 )
             )
         )
@@ -109,6 +113,7 @@ class CameraViewModelTest {
                     exposureCompRange = -6..6,
                     exposureCompStep = 1f / 3f,
                     highSpeedVideo = null,
+                    rawCapability = null,
                 )
             )
         )
@@ -185,6 +190,7 @@ class CameraViewModelTest {
                     exposureCompRange = -6..6,
                     exposureCompStep = 0.5f,
                     highSpeedVideo = null,
+                    rawCapability = null,
                 )
             )
         )
@@ -205,6 +211,7 @@ class CameraViewModelTest {
                     exposureCompRange = -6..6,
                     exposureCompStep = 0.5f,
                     highSpeedVideo = null,
+                    rawCapability = null,
                 )
             )
         )
@@ -265,5 +272,77 @@ class CameraViewModelTest {
         out?.recycle()
         a.recycle()
         b.recycle()
+    }
+
+    @Test
+    fun rawBitDepthFollowsWhiteLevel() {
+        assertEquals(10, RawSupport.bitDepthFromWhiteLevel(1023))
+        assertEquals(12, RawSupport.bitDepthFromWhiteLevel(4095))
+        assertEquals(14, RawSupport.bitDepthFromWhiteLevel(16383))
+        assertEquals(null, RawSupport.bitDepthFromWhiteLevel(255))
+        assertEquals(null, RawSupport.bitDepthFromWhiteLevel(null))
+    }
+
+    @Test
+    fun effectiveOutputFormatFallsBackToJpeg() {
+        assertEquals(
+            androidx.camera.core.ImageCapture.OUTPUT_FORMAT_RAW_JPEG,
+            RawSupport.effectiveOutputFormat(
+                androidx.camera.core.ImageCapture.OUTPUT_FORMAT_RAW_JPEG,
+                true,
+            ),
+        )
+        assertEquals(
+            androidx.camera.core.ImageCapture.OUTPUT_FORMAT_JPEG,
+            RawSupport.effectiveOutputFormat(
+                androidx.camera.core.ImageCapture.OUTPUT_FORMAT_RAW,
+                false,
+            ),
+        )
+    }
+
+    @Test
+    fun saveFormatCoercesWithoutRawSupport() {
+        val vm = vm()
+        val rawLens =
+            lensWith(
+                LensCapabilities(
+                    supportsManualSensor = true,
+                    isoRange = 100..800,
+                    exposureRangeNs = 1_000_000L..100_000_000L,
+                    minFocusDistance = 5f,
+                    awbModes = listOf(1, 2),
+                    hasFlash = false,
+                    maxZoomRatio = 2f,
+                    exposureCompRange = -6..6,
+                    exposureCompStep = 0.5f,
+                    highSpeedVideo = null,
+                    rawCapability = RawCapability(supported = true, bitDepth = 12, maxSize = null),
+                )
+            )
+        val jpegLens =
+            lensWith(
+                LensCapabilities(
+                    supportsManualSensor = true,
+                    isoRange = 100..800,
+                    exposureRangeNs = 1_000_000L..100_000_000L,
+                    minFocusDistance = 5f,
+                    awbModes = listOf(1, 2),
+                    hasFlash = false,
+                    maxZoomRatio = 2f,
+                    exposureCompRange = -6..6,
+                    exposureCompStep = 0.5f,
+                    highSpeedVideo = null,
+                    rawCapability = RawCapability(supported = false, bitDepth = null, maxSize = null),
+                )
+            )
+        vm.setLens(rawLens)
+        vm.setSaveFormat(SaveFormat.RAW)
+        assertEquals(SaveFormat.RAW, vm.settings.value.saveFormat)
+        // Selecting RAW on a JPEG-only lens falls back to JPEG.
+        vm.setLens(jpegLens)
+        assertEquals(SaveFormat.JPEG, vm.settings.value.saveFormat)
+        vm.setSaveFormat(SaveFormat.JPEG_RAW)
+        assertEquals(SaveFormat.JPEG, vm.settings.value.saveFormat)
     }
 }

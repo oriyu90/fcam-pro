@@ -1,4 +1,13 @@
-# Fcam pro — 設計概要と実装状況（v2.2.0）
+# Fcam pro — 設計概要と実装状況（v2.3.0）
+
+## v2.3.0 の変更点（センサーRAW保存形式）
+
+- **対応検出**: レンズ検出時に `REQUEST_AVAILABLE_CAPABILITIES_RAW`＋`RAW_SENSOR` ストリームサイズの有無で DNG 可否を判定（`RawCapability`）。ビット深度は `SENSOR_INFO_WHITE_LEVEL` からのヒューリスティック（1023→RAW10、4095→RAW12、16383→API 37 の RAW14、それ以外は不明）を UI バッジ表示専用に保持。センサーのパッキング形式自体は CameraX／DngCreator 側で消費し、アプリは DNG だけを扱う。
+- **保存形式**: `SaveFormat`（JPEG / JPEG+RAW / RAW）を `CameraSettings` に追加。プロモードのマニュアルパネル先頭にセレクタ（`SaveFormatSelector`、対応レンズのみ表示、非対応は JPEG に強制・セレクタ非表示）。レンズ切替時は対応状況で再クランプ。プロファイルには含めない（フラッシュ等と同様のセッション設定）。
+- **撮影パス**: CameraX 1.5 の `setOutputFormat(OUTPUT_FORMAT_RAW / RAW_JPEG)` を使用（Camera2 直叩きの自前セッションは不要）。bind 時に PHOTO かつ OS 要求なしの場合のみ RAW 系を要求し、それ以外（パノラマ・OTHERS・外部要求）は JPEG 固定。JPEG+RAW は `takePicture(rawOpts, jpegOpts, …)` の二重コールバックを MIME 判定（`image/x-adobe-dng`）で振り分け、両ファイルに保存完了通知。DNG は `Pictures/Fcam pro` に `.dng` で保存。
+- versionCode 7 / versionName 2.3.0。単体テスト 18 件＋ lint グリーン。
+
+---
 
 ## v2.2.0 の変更点（スローモーション・パノラマ・露出補正・スマホUI刷新）
 

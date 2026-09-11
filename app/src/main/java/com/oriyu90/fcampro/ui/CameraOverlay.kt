@@ -1188,6 +1188,16 @@ private fun ManualPanel(
             }
         }
 
+        // Still save format: only on lenses whose sensor reports RAW output.
+        // JPEG-only lenses hide the selector entirely (JPEG is implied).
+        if (caps.rawCapability?.supported == true) {
+            SaveFormatSelector(
+                selected = settings.saveFormat,
+                bitDepth = caps.rawCapability.bitDepth,
+                onSelect = { viewModel.setSaveFormat(it) },
+            )
+        }
+
         val isoRange = caps.isoRange ?: 50..3200
         LabeledSlider(
             label = stringResource(R.string.label_iso),
@@ -1383,6 +1393,49 @@ private fun ManualPanel(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun SaveFormatSelector(
+    selected: SaveFormat,
+    bitDepth: Int?,
+    onSelect: (SaveFormat) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val options =
+        listOf(
+            SaveFormat.JPEG to R.string.format_jpeg,
+            SaveFormat.JPEG_RAW to R.string.format_jpeg_raw,
+            SaveFormat.RAW to R.string.format_raw,
+        )
+    Column(modifier = modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = stringResource(R.string.label_save_format),
+                color = Color.White,
+                style = MaterialTheme.typography.labelSmall,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text =
+                    if (bitDepth == null) stringResource(R.string.format_raw)
+                    else stringResource(R.string.raw_bit_depth, bitDepth),
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            options.forEach { (format, res) ->
+                FilterChip(
+                    selected = selected == format,
+                    onClick = { onSelect(format) },
+                    label = { Text(stringResource(res)) },
+                )
+            }
+        }
     }
 }
 

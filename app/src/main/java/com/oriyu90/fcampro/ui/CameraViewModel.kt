@@ -13,6 +13,8 @@ import androidx.camera.core.ImageCapture
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.oriyu90.fcampro.camera.RawCapability
+import com.oriyu90.fcampro.camera.RawSupport
 import com.oriyu90.fcampro.core.AppSettings
 import com.oriyu90.fcampro.data.AppDatabase
 import com.oriyu90.fcampro.data.CameraProfile
@@ -29,6 +31,9 @@ import kotlinx.coroutines.launch
 enum class CameraLensType { ULTRAWIDE, WIDE, TELEPHOTO, MACRO, FRONT }
 
 enum class CameraMode { PHOTO, VIDEO, SLOWMO, PANORAMA, OTHERS }
+
+/** Still-image save format (pro panel). RAW variants need lens support. */
+enum class SaveFormat { JPEG, JPEG_RAW, RAW }
 
 /** Pure zoom-ratio helpers (unit-testable; no Android dependencies). */
 object ZoomRatios {
@@ -78,6 +83,8 @@ data class LensCapabilities(
     val exposureCompStep: Float,
     /** Best high-speed video config (null => slow-motion unsupported). */
     val highSpeedVideo: HighSpeedVideo?,
+    /** Sensor-RAW (DNG) capability (null => not probed / unsupported). */
+    val rawCapability: RawCapability?,
 )
 
 @Immutable
@@ -101,6 +108,8 @@ data class CameraSettings(
     val whiteBalanceMode: Int? = null,
     /** AE exposure-compensation index; only meaningful when ISO/shutter are auto. */
     val exposureCompensation: Int = 0,
+    /** Still save format; RAW variants are coerced to JPEG when unsupported. */
+    val saveFormat: SaveFormat = SaveFormat.JPEG,
     val flashMode: Int = ImageCapture.FLASH_MODE_AUTO,
     val timerSeconds: Int = 0,
     val isFrontCamera: Boolean = false,
@@ -218,6 +227,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)
                         ?.toDouble()?.toFloat() ?: 0f
                 val highSpeed = bestHighSpeedVideo(chars)
+                val rawCapability = probeRawCapability(chars)
 
                 lenses.add(
                     CameraLensInfo(
@@ -237,6 +247,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                                 exposureCompRange = evRange?.let { it.lower..it.upper },
                                 exposureCompStep = evStep,
                                 highSpeedVideo = highSpeed,
+                                rawCapability = rawCapability,
                             ),
                     )
                 )
@@ -268,6 +279,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     /** True when the active lens can record constrained high-speed video. */
     fun isSlowMotionSupported(): Boolean =
         currentCapabilities()?.highSpeedVideo?.let { it.maxFps >= MIN_SLOWMO_FPS } ?: false
+
+    /** True when the active lens can produce sensor-RAW (DNG) output. */
+    fun isRawSupported(): Boolean =
+        currentCapabilities()?.rawCapability?.supported == true
+
+    /** Save format, coerced to JPEG when the lens has no RAW support. */
+    fun setSaveFormat(format: SaveFormat) {
+        _settings.value =
+            _settings.value.copy(
+                saveFormat = if (isRawSupported()) format else SaveFormat.JPEG
+            )
+    }
 
     // --- Mode / simple toggles -------------------------------------------------
 
@@ -304,6 +327,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     focusDistance = null,
                     whiteBalanceMode = null,
                     exposureCompensation = 0,
+                    saveFormat = coerceSaveFormat(_settings.value.saveFormat, lens),
                 )
         }
     }
@@ -354,6 +378,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 focusDistance = null,
                 whiteBalanceMode = null,
                 exposureCompensation = 0,
+                saveFormat = coerceSaveFormat(_settings.value.saveFormat, lens),
             )
     }
 
@@ -446,6 +471,35 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         /** Minimum high-speed fps that counts as slow-motion capable (2x of 30fps). */
         const val MIN_SLOWMO_FPS = 60
+
+        fun coerceSaveFormat(format: SaveFormat, lens: CameraLensInfo): SaveFormat =
+            if (lens.capabilities.rawCapability?.supported == true) format
+            else SaveFormat.JPEG
+
+        /**
+         * Sensor-RAW probe: REQUEST_AVAILABLE_CAPABILITIES_RAW plus at least
+         * one RAW_SENSOR stream size. Bit depth is a white-level heuristic
+         * (RAW10/RAW12/API-37 RAW14 scale) for the UI badge only.
+         */
+        fun probeRawCapability(chars: CameraCharacteristics): RawCapability {
+            val caps = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+            val hasRaw =
+                caps?.contains(
+                    CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_RAW
+                ) ?: false
+            val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            val rawSizes =
+                map?.getOutputSizes(android.graphics.ImageFormat.RAW_SENSOR)
+            val supported = hasRaw && !rawSizes.isNullOrEmpty()
+            return RawCapability(
+                supported = supported,
+                bitDepth =
+                    RawSupport.bitDepthFromWhiteLevel(
+                        chars.get(CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL)
+                    ),
+                maxSize = rawSizes?.maxByOrNull { it.width * it.height },
+            )
+        }
 
         /**
          * Best constrained high-speed video config, or null when the camera has none.

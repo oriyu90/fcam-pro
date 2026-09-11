@@ -44,6 +44,12 @@
     <string name="label_wb">WB</string>
     <string name="label_shutter_volume">Shutter volume</string>
     <string name="label_mic">Mic</string>
+    <string name="label_save_format">Save format</string>
+    <string name="format_jpeg">JPEG</string>
+    <string name="format_jpeg_raw">JPEG+RAW</string>
+    <string name="format_raw">RAW</string>
+    <string name="raw_bit_depth">RAW%1$d</string>
+    <string name="snack_raw_saved">DNG raw saved to gallery</string>
     <string name="label_ev">EV comp</string>
     <string name="ev_value">%+.1f EV</string>
     <string name="value_auto">Auto</string>
