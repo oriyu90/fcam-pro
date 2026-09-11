@@ -2,6 +2,7 @@ package com.oriyu90.fcampro.ui
 
 import android.content.ContentValues
 import android.content.Intent
+import android.content.res.Configuration
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -18,6 +19,7 @@ import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.CaptureRequestOptions
+import androidx.camera.core.AspectRatio
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraFilter
 import androidx.camera.core.CameraSelector
@@ -47,12 +49,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -124,6 +128,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -1224,23 +1229,8 @@ fun CameraScreen(
     ) { padding ->
         @Composable
         fun PreviewSurface(modifier: Modifier) {
-            // Single AndroidView node for the shared PreviewView: hosting one
-            // View in two AndroidView nodes crashes ("child already has a
-            // parent"), so all layouts reuse this call site. The pro overlay
-            // covers the lower/right part; FILL_START hugs the preview to the
-            // visible top/left instead of center-cropping behind the panel.
-            val proMode =
-                external == null &&
-                    settings.isManualMode &&
-                    (settings.cameraMode == CameraMode.PHOTO ||
-                        settings.cameraMode == CameraMode.VIDEO)
             AndroidView(
                 factory = { previewView },
-                update = {
-                    it.scaleType =
-                        if (proMode) PreviewView.ScaleType.FILL_START
-                        else PreviewView.ScaleType.FILL_CENTER
-                },
                 modifier =
                     modifier
                         .onSizeChanged { previewSize = it }
@@ -1359,9 +1349,41 @@ fun CameraScreen(
             }
         }
 
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-            PreviewSurface(Modifier.fillMaxSize())
-            PreviewDecor()
+        // Pro mode shrinks the preview onto a black stage (Sony-style); the
+        // AndroidView node itself stays at this one call site so no
+        // reparenting crash can occur — only the container size changes.
+        val proMode =
+            external == null &&
+                settings.isManualMode &&
+                (settings.cameraMode == CameraMode.PHOTO ||
+                    settings.cameraMode == CameraMode.VIDEO)
+        val cfg = LocalConfiguration.current
+        val proLandscape = cfg.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val streamAspect =
+            if (settings.aspectRatio == AspectRatio.RATIO_16_9) 16f / 9f else 4f / 3f
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black).padding(padding)) {
+            Box(
+                when {
+                    !proMode -> Modifier.fillMaxSize()
+                    !proLandscape ->
+                        Modifier.fillMaxWidth().aspectRatio(streamAspect)
+                            .align(Alignment.TopCenter)
+                    else ->
+                        Modifier.fillMaxHeight().aspectRatio(streamAspect)
+                            .align(Alignment.CenterStart)
+                }
+            ) {
+                PreviewSurface(Modifier.fillMaxSize())
+                PreviewDecor()
+                if (proMode) {
+                    ProStatusStrip(
+                        batteryPct = batteryPct,
+                        mode = settings.cameraMode,
+                        lens = settings.currentLens,
+                        hasMedia = lastMedia != null,
+                    )
+                }
+            }
 
             CameraOverlay(
                 viewModel = viewModel,

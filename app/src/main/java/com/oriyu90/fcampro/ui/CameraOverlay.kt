@@ -196,13 +196,13 @@ fun CameraOverlay(
             onOpenSettings = onOpenSettings,
         )
 
-    // Pro (manual) mode uses the dedicated Sony-style overlay: status strip
-    // over the shared full-bleed preview plus a concentrated panel.
+    // Pro (manual) mode uses the dedicated Sony-style overlay: transparent
+    // spacers over the shared preview plus a concentrated panel.
     if (external == null &&
         settings.isManualMode &&
         isStillMode(settings.cameraMode)
     ) {
-        ProCameraUi(shared)
+        ProModeOverlay(shared)
         return
     }
 
@@ -1700,6 +1700,7 @@ private fun ProPanel(
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
+        ControlIcons(s = s, columns = 1)
         ProQuickRow(s)
         LensZoomPills(
             lenses = s.availableLenses.filter { it.isFront == s.settings.isFrontCamera },
@@ -1726,62 +1727,37 @@ private fun ProPanel(
     }
 }
 
-/** Sony-style pro shell: status strip over the preview, concentrated panel.
- *
- * The preview surface itself is NOT hosted here: a single AndroidView node
- * lives in CameraScreen (sharing one View across two AndroidView nodes
- * crashes with "child already has a parent" on layout switches), so this
- * shell only overlays the status strip and the bottom/side panel while the
- * full-bleed preview shows through the transparent areas.
- */
+/** Sony-style pro overlay: transparent spacers over the shared preview plus a
+ * concentrated black panel. The preview surface itself stays in CameraScreen
+ * (single AndroidView node); this shell never hosts it. */
 @Composable
-private fun ProCameraUi(s: SharedActions) {
+private fun ProModeOverlay(s: SharedActions) {
     val cfg = LocalConfiguration.current
     val landscape = cfg.orientation == Configuration.ORIENTATION_LANDSCAPE
     val compact = cfg.smallestScreenWidthDp < 600
     when (proArrangement(compact, landscape)) {
         ProArrangement.PHONE_PORTRAIT ->
             Column(Modifier.fillMaxSize()) {
-                ProStatusStrip(
-                    batteryPct = s.batteryPct,
-                    mode = s.settings.cameraMode,
-                    lens = s.settings.currentLens,
-                    hasMedia = s.hasMedia,
-                )
-                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.weight(0.75f))
                 ProPanel(
                     s = s,
                     showShutter = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().weight(1.25f),
                 )
             }
         ProArrangement.PHONE_LANDSCAPE ->
             Row(Modifier.fillMaxSize()) {
-                Column(Modifier.fillMaxHeight().weight(1.05f)) {
-                    ProStatusStrip(
-                        batteryPct = s.batteryPct,
-                        mode = s.settings.cameraMode,
-                        lens = s.settings.currentLens,
-                        hasMedia = s.hasMedia,
-                    )
-                    Spacer(Modifier.weight(1f))
-                }
+                Spacer(Modifier.fillMaxHeight().weight(1.1f))
                 ProPanel(
                     s = s,
                     showShutter = true,
-                    modifier = Modifier.fillMaxHeight().weight(1f),
+                    modifier = Modifier.fillMaxHeight().weight(0.9f),
                 )
             }
         // Tablet portrait: the shutter sits just below the preview's right edge.
         ProArrangement.TABLET_PORTRAIT ->
             Row(Modifier.fillMaxSize()) {
                 Column(Modifier.fillMaxHeight().weight(1.3f)) {
-                    ProStatusStrip(
-                        batteryPct = s.batteryPct,
-                        mode = s.settings.cameraMode,
-                        lens = s.settings.currentLens,
-                        hasMedia = s.hasMedia,
-                    )
                     Spacer(Modifier.weight(1f))
                     Row(
                         Modifier.fillMaxWidth()
@@ -1809,15 +1785,7 @@ private fun ProCameraUi(s: SharedActions) {
             }
         ProArrangement.TABLET_LANDSCAPE ->
             Row(Modifier.fillMaxSize()) {
-                Column(Modifier.fillMaxHeight().weight(1.25f)) {
-                    ProStatusStrip(
-                        batteryPct = s.batteryPct,
-                        mode = s.settings.cameraMode,
-                        lens = s.settings.currentLens,
-                        hasMedia = s.hasMedia,
-                    )
-                    Spacer(Modifier.weight(1f))
-                }
+                Spacer(Modifier.fillMaxHeight().weight(1.25f))
                 ProPanel(
                     s = s,
                     showShutter = true,
