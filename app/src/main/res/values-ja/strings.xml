@@ -41,6 +41,7 @@
     <string name="label_iso">ISO</string>
     <string name="label_shutter">速度</string>
     <string name="label_focus">フォーカス</string>
+    <string name="label_aperture">絞り</string>
     <string name="label_wb">WB</string>
     <string name="label_shutter_volume">シャッター音量</string>
     <string name="label_mic">マイク</string>

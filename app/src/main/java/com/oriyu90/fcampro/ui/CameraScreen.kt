@@ -375,7 +375,7 @@ fun CameraScreen(
                         val match =
                             infos.filter {
                                 runCatching { Camera2CameraInfo.from(it).cameraId }.getOrNull() ==
-                                    lens.id
+                                    lens.logicalCameraId
                             }
                         if (match.isNotEmpty()) match else infos
                     }
@@ -383,6 +383,13 @@ fun CameraScreen(
                 .build()
 
         val previewBuilder = Preview.Builder().setResolutionSelector(resolutionSelector)
+        // Sub-cameras hidden behind a logical multi-camera (e.g. Galaxy
+        // telephoto) are routed via the physical id on every use case.
+        lens.physicalCameraId?.let { pid ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                Camera2Interop.Extender(previewBuilder).setPhysicalCameraId(pid)
+            }
+        }
 
         val slowMoHs =
             if (settings.cameraMode == CameraMode.SLOWMO) {
@@ -405,6 +412,12 @@ fun CameraScreen(
                     .setQualitySelector(QualitySelector.fromOrderedList(qualities))
                     .build()
             val vb = VideoCapture.Builder(recorder)
+            lens.physicalCameraId?.let { pid ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                Camera2Interop.Extender(pb).setPhysicalCameraId(pid)
+                Camera2Interop.Extender(vb).setPhysicalCameraId(pid)
+            }
+            }
             if (useHighSpeed && slowMoHs != null) {
                 // Request a fixed high frame rate on both streams. Strict HALs
                 // reject the combination; callers fall back to a plain bind.
@@ -480,6 +493,11 @@ fun CameraScreen(
                             )
                             .setResolutionSelector(resolutionSelector)
                             .setOutputFormat(stillOutputFormat)
+                    lens.physicalCameraId?.let { pid ->
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            Camera2Interop.Extender(icBuilder).setPhysicalCameraId(pid)
+                        }
+                    }
                     val ic = icBuilder.build()
                     imageCapture = ic
                     if (settings.cameraMode == CameraMode.PANORAMA) {
@@ -1165,11 +1183,12 @@ fun CameraScreen(
         containerColor = Color.Black,
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+        @Composable
+        fun PreviewSurface(modifier: Modifier) {
             AndroidView(
                 factory = { previewView },
                 modifier =
-                    Modifier.fillMaxSize()
+                    modifier
                         .onSizeChanged { previewSize = it }
                         .pointerInput(camera, settings.isManualMode, settings.focusDistance, focusLocked) {
                             detectTapGestures { offset -> onPreviewTap(offset) }
@@ -1193,7 +1212,10 @@ fun CameraScreen(
                             }
                         },
             )
+        }
 
+        @Composable
+        fun PreviewDecor() {
             if (flashAlpha > 0f) {
                 Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = flashAlpha)))
             }
@@ -1281,6 +1303,11 @@ fun CameraScreen(
             if (settings.cameraMode == CameraMode.PANORAMA) {
                 PanoramaGuideFrame()
             }
+        }
+
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            PreviewSurface(Modifier.fillMaxSize())
+            PreviewDecor()
 
             CameraOverlay(
                 viewModel = viewModel,
@@ -1341,7 +1368,8 @@ fun CameraScreen(
                         BackgroundCameraService.start(
                             context,
                             lensFront = settings.isFrontCamera,
-                            cameraId = settings.currentLens?.id,
+                            cameraId = settings.currentLens?.logicalCameraId,
+                            physicalCameraId = settings.currentLens?.physicalCameraId,
                             targetRotation =
                                 previewView.display?.rotation
                                     ?: android.view.Surface.ROTATION_0,
@@ -1351,6 +1379,16 @@ fun CameraScreen(
                 },
                 onOpenSettings = onOpenSettings,
                 onCancelExternal = { onExternalResult(false, null) },
+                previewContent = {
+                    PreviewSurface(Modifier.fillMaxSize())
+                    PreviewDecor()
+                    ProStatusStrip(
+                        batteryPct = batteryPct,
+                        mode = settings.cameraMode,
+                        lens = settings.currentLens,
+                        hasMedia = lastMedia != null,
+                    )
+                },
             )
         }
     }

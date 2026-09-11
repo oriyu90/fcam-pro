@@ -14,7 +14,9 @@ import com.oriyu90.fcampro.ui.CameraLensType
 import com.oriyu90.fcampro.ui.CameraViewModel
 import com.oriyu90.fcampro.ui.ExposureComp
 import com.oriyu90.fcampro.ui.LensCapabilities
+import com.oriyu90.fcampro.ui.ManualExposure
 import com.oriyu90.fcampro.ui.SaveFormat
+import com.oriyu90.fcampro.ui.formatStorageGb
 import com.oriyu90.fcampro.ui.ZoomRatios
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -35,6 +37,8 @@ class CameraViewModelTest {
             focalLength = 4.5f,
             isFront = false,
             capabilities = caps,
+            logicalCameraId = "test-0",
+            physicalCameraId = null,
         )
 
     @Test
@@ -87,6 +91,7 @@ class CameraViewModelTest {
                     exposureCompStep = 1f / 3f,
                     highSpeedVideo = null,
                     rawCapability = null,
+                    apertures = emptyList(),
                 )
             )
         )
@@ -114,17 +119,58 @@ class CameraViewModelTest {
                     exposureCompStep = 1f / 3f,
                     highSpeedVideo = null,
                     rawCapability = null,
+                    apertures = emptyList(),
                 )
             )
         )
         vm.updateManualSettings(iso = 400, shutterNs = 50_000_000L, focus = 2f, wb = 2)
+        // Exposure is atomic: clearing one side refills it with the default.
         vm.updateManualSettings(iso = null, shutterNs = 50_000_000L, focus = 2f, wb = 2)
-        assertEquals(null, vm.settings.value.iso)
+        assertEquals(100, vm.settings.value.iso)
         assertEquals(50_000_000L, vm.settings.value.shutterSpeedNs)
-        vm.updateManualSettings(iso = null, shutterNs = null, focus = null, wb = null)
+        vm.clearExposureManual()
+        assertEquals(null, vm.settings.value.iso)
         assertEquals(null, vm.settings.value.shutterSpeedNs)
+        vm.updateManualSettings(iso = null, shutterNs = null, focus = null, wb = null)
         assertEquals(null, vm.settings.value.focusDistance)
         assertEquals(null, vm.settings.value.whiteBalanceMode)
+    }
+
+    @Test
+    fun exposureIsAtomicWhenSetOneSided() {
+        val vm = vm()
+        vm.setLens(
+            lensWith(
+                LensCapabilities(
+                    supportsManualSensor = true,
+                    isoRange = 100..800,
+                    exposureRangeNs = 1_000_000L..100_000_000L,
+                    minFocusDistance = 5f,
+                    awbModes = listOf(1, 2),
+                    hasFlash = false,
+                    maxZoomRatio = 2f,
+                    exposureCompRange = -6..6,
+                    exposureCompStep = 0.5f,
+                    highSpeedVideo = null,
+                    rawCapability = null,
+                    apertures = emptyList(),
+                )
+            )
+        )
+        // ISO only: shutter fills with the 1/60 default (inside the range).
+        vm.updateManualSettings(iso = 400, shutterNs = null, focus = null, wb = null)
+        assertEquals(400, vm.settings.value.iso)
+        assertEquals(16_666_667L, vm.settings.value.shutterSpeedNs)
+        // Shutter only: ISO fills with the 100 default.
+        vm.clearExposureManual()
+        vm.updateManualSettings(iso = null, shutterNs = 50_000_000L, focus = null, wb = null)
+        assertEquals(100, vm.settings.value.iso)
+        assertEquals(50_000_000L, vm.settings.value.shutterSpeedNs)
+        // Pure helper: both-auto stays both-auto.
+        assertEquals(
+            null to null,
+            ManualExposure.complete(null, null, 100..800, 1L..100L),
+        )
     }
 
     @Test
@@ -191,6 +237,7 @@ class CameraViewModelTest {
                     exposureCompStep = 0.5f,
                     highSpeedVideo = null,
                     rawCapability = null,
+                    apertures = emptyList(),
                 )
             )
         )
@@ -212,6 +259,7 @@ class CameraViewModelTest {
                     exposureCompStep = 0.5f,
                     highSpeedVideo = null,
                     rawCapability = null,
+                    apertures = emptyList(),
                 )
             )
         )
@@ -284,6 +332,13 @@ class CameraViewModelTest {
     }
 
     @Test
+    fun formatStorageGbShowsOneDecimal() {
+        assertEquals("--", formatStorageGb(-1L))
+        assertEquals("0.0 GB", formatStorageGb(0L))
+        assertEquals("12.4 GB", formatStorageGb(12_400_000_000L))
+    }
+
+    @Test
     fun rawBitDepthFollowsWhiteLevel() {
         assertEquals(10, RawSupport.bitDepthFromWhiteLevel(1023))
         assertEquals(12, RawSupport.bitDepthFromWhiteLevel(4095))
@@ -327,6 +382,7 @@ class CameraViewModelTest {
                     exposureCompStep = 0.5f,
                     highSpeedVideo = null,
                     rawCapability = RawCapability(supported = true, bitDepth = 12, maxSize = null),
+                    apertures = emptyList(),
                 )
             )
         val jpegLens =
@@ -343,6 +399,7 @@ class CameraViewModelTest {
                     exposureCompStep = 0.5f,
                     highSpeedVideo = null,
                     rawCapability = RawCapability(supported = false, bitDepth = null, maxSize = null),
+                    apertures = emptyList(),
                 )
             )
         vm.setLens(rawLens)

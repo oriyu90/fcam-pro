@@ -16,8 +16,8 @@ localized Japanese / English interface.
 | Area | What you get |
 |---|---|
 | Capture | Photo, video, slow-motion & panorama, 4:3 / 16:9, self-timer (0/3/10 s), flash auto/on/off, rule-of-thirds grid, tap to lock / unlock focus, pinch-to-zoom with an on-screen ratio pill (tap to reset to 1.0x; camera and UI always start at 1.0x), one-tap jump to the system gallery |
-| Manual controls | ISO, shutter speed, focus distance and white balance — every slider is clamped to the ranges the selected physical camera actually reports, and each one (or all at once) can be set back to Auto. While exposure stays fully auto, an exposure-compensation (EV) slider appears right below the speed control. On lenses with sensor-RAW output the save format is selectable: JPEG / JPEG+RAW / RAW (DNG) |
-| Lenses | Ultra-wide / wide / tele / macro / front — binds the real `cameraId`; a zoom-factor pill row (×0.5 / ×1 / ×2 …) in phone mode, switcher row on larger screens |
+| Manual controls | ISO, shutter speed, focus distance and white balance — every slider is clamped to the ranges the selected physical camera actually reports, and each one (or all at once) can be set back to Auto. Exposure is atomic: setting ISO or speed alone fills the other with a clamped default (AE-off with a single parameter is HAL-undefined). While exposure stays fully auto, an exposure-compensation (EV) slider appears right below the speed control. On lenses with sensor-RAW output the save format is selectable: JPEG / JPEG+RAW / RAW (DNG). Manual mode uses a dedicated pro layout: shrunken preview with a battery/mode/storage/lens strip, an SS/F/EV/ISO quick row (tap to toggle), and a concentrated settings panel with its own shutter |
+| Lenses | Ultra-wide / wide / tele / macro / front — binds the real `cameraId`, including sub-cameras hidden behind a logical multi-camera (e.g. Galaxy telephoto) via `setPhysicalCameraId`; a zoom-factor pill row (×0.5 / ×1 / ×2 …) in phone mode, switcher row on larger screens. Aperture (f-number) is shown when the HAL reports it |
 | Adaptive UI | Phone-portrait uses a bottom shutter bar (thumbnail | large shutter | front-back switch) with centered zoom pills and a scrollable mode selector; ≥600 dp portrait shows a floating left panel with two-column icons, vertical mode tabs and top/center/bottom alignment — the panel widens while the manual panel is open; landscape shows a right side-rail. The panel collapses to a draggable shutter + battery + "expand" cluster |
 | Profiles | Save, rename, delete and re-apply manual setups (Room database, survives reinstall-safe destructive migration) |
 | OTHERS | Time-lapse (configurable 1–10 s interval, auto-stop on repeated errors), background video recording via a foreground service with an elapsed-time notification (continues the active lens, disabled shutter/lens UI while running), QR detection with open / copy |
@@ -121,8 +121,9 @@ MIT — see [LICENSE](LICENSE). Author: **Yuki_Orita** (折田悠希 / おりた
 
 - 写真／動画／スローモーション／パノラマ、4:3・16:9、セルフタイマー（0/3/10 秒）、フラッシュ、三分割グリッド、タップでフォーカス固定／解除、ピンチズーム（画面に倍率表示、タップで1倍にリセット。起動時はUI・カメラとも必ず1倍）、標準ギャラリーへのワンタップ遷移
 - ISO・シャッター速度・フォーカス距離・ホワイトバランスのマニュアル制御
-  （各スライダーは選択中の物理カメラが報告する範囲に自動でクランプ。各項目・一括でオートに戻せる。露出が完全オートの間は速度の下に露出補正スライダーが出る。センサーRAW対応レンズでは保存形式を選択可能：JPEG／JPEG+RAW／RAW(DNG)）
-- 超広角／広角／望遠／マクロ／前面レンズを実 `cameraId` で切り替え（写真・動画モードで常時表示の選択行）
+  （各スライダーは選択中の物理カメラが報告する範囲に自動でクランプ。各項目・一括でオートに戻せる。露出の手動化は不可分：ISO・速度の片方だけ設定するともう片方は既定値で補完される。露出が完全オートの間は速度の下に露出補正スライダーが出る。センサーRAW対応レンズでは保存形式を選択可能：JPEG／JPEG+RAW／RAW(DNG)）
+- 超広角／広角／望遠／マクロ／前面レンズを実 `cameraId` で切り替え（論理マルチカメラ背後のサブカメラ＝Galaxy の望遠等も `setPhysicalCameraId` で対応）。HAL が報告する絞り値（F値）を表示
+- プロモード時は専用レイアウト：縮小プレビュー＋上部状態帯（バッテリー／モード／空き容量／焦点距離）、プレビュー直下のSS・F値・EV・ISOクイック行（タップで切替）、設定集中パネル＋シャッター
 - 画面に応じた操作パネル: スマホ縦は従来の縦積み、≥600dp 縦は左に浮くパネル（アイコン 2 列・縦タブ・上/中央/下寄せ）、横向きは右のサイドバー。パネルは開閉でき、閉じるとシャッター＋バッテリー＋展開ボタンだけの移動可能なクラスタになる
 - マニュアル設定のプロファイル保存・改名・削除・再適用（Room）
 - タイムラプス（間隔 1〜10 秒、連続エラー時に自動停止）、バックグラウンド録画（使用中のレンズを引き継ぎ、録画中はシャッター・レンズ切替を無効化）、QR 検出

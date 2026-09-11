@@ -2,10 +2,12 @@ package com.oriyu90.fcampro.ui
 
 import android.app.Application
 import android.content.Context
+import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraMetadata
 import android.net.Uri
+import android.os.Build
 import android.util.Log
 import android.util.Range
 import androidx.camera.core.AspectRatio
@@ -58,6 +60,44 @@ object ExposureComp {
         "%+.1f EV".format(Locale.US, value * step)
 }
 
+/**
+ * Atomic manual-exposure helpers (unit-testable).
+ *
+ * Camera2 AE_MODE_OFF requires BOTH SENSOR_SENSITIVITY and SENSOR_EXPOSURE_TIME;
+ * sending only one side is HAL-undefined (ignored / black frames on strict HALs
+ * such as Samsung's). Exposure manual state is therefore atomic: setting either
+ * side fills the other with a clamped default, and clearing either side clears
+ * both back to full auto.
+ */
+object ManualExposure {
+    const val DEFAULT_ISO = 100
+    const val DEFAULT_SHUTTER_NS = 16_666_667L // 1/60 s
+
+    fun defaultIso(isoRange: IntRange?): Int {
+        val d = DEFAULT_ISO
+        return isoRange?.let { d.coerceIn(it.first, it.last) } ?: d
+    }
+
+    fun defaultShutterNs(expRange: LongRange?): Long {
+        val d = DEFAULT_SHUTTER_NS
+        return expRange?.let { d.coerceIn(it.first, it.last) } ?: d
+    }
+
+    /**
+     * Complete a possibly half-manual pair. Returns (null, null) when both are
+     * auto, otherwise both sides filled (missing side = clamped default).
+     */
+    fun complete(
+        iso: Int?,
+        shutterNs: Long?,
+        isoRange: IntRange?,
+        expRange: LongRange?,
+    ): Pair<Int?, Long?> {
+        if (iso == null && shutterNs == null) return null to null
+        return (iso ?: defaultIso(isoRange)) to (shutterNs ?: defaultShutterNs(expRange))
+    }
+}
+
 /** Constrained high-speed video configuration of one physical camera. */
 @Immutable
 data class HighSpeedVideo(
@@ -85,6 +125,8 @@ data class LensCapabilities(
     val highSpeedVideo: HighSpeedVideo?,
     /** Sensor-RAW (DNG) capability (null => not probed / unsupported). */
     val rawCapability: RawCapability?,
+    /** Available apertures (f-numbers); empty when unreported (fixed aperture). */
+    val apertures: List<Float>,
 )
 
 @Immutable
@@ -94,7 +136,17 @@ data class CameraLensInfo(
     val focalLength: Float,
     val isFront: Boolean,
     val capabilities: LensCapabilities,
-)
+    /** CameraX selector match id (logical camera). */
+    val logicalCameraId: String,
+    /**
+     * Physical camera id behind a logical multi-camera (e.g. Galaxy telephoto),
+     * or null when [id] is directly bindable. Bound via setPhysicalCameraId.
+     */
+    val physicalCameraId: String?,
+) {
+    /** True for sub-cameras hidden behind a logical multi-camera. */
+    val isPhysical: Boolean get() = physicalCameraId != null
+}
 
 @Immutable
 data class CameraSettings(
@@ -175,6 +227,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
         val lenses = mutableListOf<CameraLensInfo>()
+        val seenPhysicalIds = mutableSetOf<String>()
         try {
             for (id in manager.cameraIdList) {
                 val chars =
@@ -189,75 +242,56 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 // capture use case; binding them throws. Skip them.
                 if (!backwardCompatible) continue
 
-                val facing = chars.get(CameraCharacteristics.LENS_FACING)
-                val isFront = facing == CameraCharacteristics.LENS_FACING_FRONT
-                val focalLengths =
-                    chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
-                val focalLength = focalLengths?.firstOrNull() ?: 4.5f
-                val minFocus =
-                    chars.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
-
-                val type =
-                    when {
-                        isFront -> CameraLensType.FRONT
-                        minFocus >= 10f -> CameraLensType.MACRO
-                        focalLength < 3.5f -> CameraLensType.ULTRAWIDE
-                        focalLength > 6.5f -> CameraLensType.TELEPHOTO
-                        else -> CameraLensType.WIDE
-                    }
-
-                val manualSensor =
-                    caps?.contains(
-                        CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR
-                    ) ?: false
-                val isoR: Range<Int>? =
-                    chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
-                val expR: Range<Long>? =
-                    chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
-                val awb =
-                    chars.get(CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES)?.toList()
-                        ?: emptyList()
-                val flash =
-                    chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
-                val maxZoom =
-                    chars.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f
-                val evRange: Range<Int>? =
-                    chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)
-                val evStep =
-                    chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)
-                        ?.toDouble()?.toFloat() ?: 0f
-                val highSpeed = bestHighSpeedVideo(chars)
-                val rawCapability = probeRawCapability(chars)
-
-                lenses.add(
-                    CameraLensInfo(
-                        id = id,
-                        type = type,
-                        focalLength = focalLength,
-                        isFront = isFront,
-                        capabilities =
-                            LensCapabilities(
-                                supportsManualSensor = manualSensor,
-                                isoRange = isoR?.let { it.lower..it.upper },
-                                exposureRangeNs = expR?.let { it.lower..it.upper },
-                                minFocusDistance = minFocus,
-                                awbModes = awb,
-                                hasFlash = flash,
-                                maxZoomRatio = maxZoom.coerceAtLeast(1f),
-                                exposureCompRange = evRange?.let { it.lower..it.upper },
-                                exposureCompStep = evStep,
-                                highSpeedVideo = highSpeed,
-                                rawCapability = rawCapability,
-                            ),
-                    )
+                // The logical camera itself is always a candidate (direct bind).
+                addLensCandidate(
+                    lenses = lenses,
+                    id = id,
+                    logicalId = id,
+                    physicalId = null,
+                    chars = chars,
+                    logicalFlash =
+                        chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false,
                 )
+
+                // Sub-cameras hidden behind a logical multi-camera (e.g. Galaxy
+                // telephoto / ultra-wide): not in cameraIdList, reachable only
+                // via setPhysicalCameraId on a logical bind.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    val physicalIds =
+                        runCatching { chars.getPhysicalCameraIds().toList() }.getOrNull()
+                            ?: emptyList()
+                    for (pid in physicalIds) {
+                        if (!seenPhysicalIds.add(pid)) continue
+                        val pchars =
+                            runCatching { manager.getCameraCharacteristics(pid) }.getOrNull()
+                                ?: continue
+                        addLensCandidate(
+                            lenses = lenses,
+                            id = pid,
+                            logicalId = id,
+                            physicalId = pid,
+                            chars = pchars,
+                            logicalFlash =
+                                chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false,
+                        )
+                    }
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error detecting lenses", e)
         }
 
         val sorted =
-            lenses.sortedWith(compareBy({ it.isFront }, { it.type.ordinal }, { it.focalLength }))
+            lenses.sortedWith(
+                compareBy(
+                    { it.isFront },
+                    { it.type.ordinal },
+                    { it.focalLength },
+                    // Directly bindable cameras first within the same bucket.
+                    { it.physicalCameraId != null },
+                    { it.id },
+                )
+            )
         _availableLenses.value = sorted
         _noCameraAvailable.value = sorted.isEmpty()
 
@@ -400,13 +434,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 val max = caps?.minFocusDistance?.takeIf { it > 0f } ?: 10f
                 v.coerceIn(0f, max)
             }
+        // Exposure is atomic (see ManualExposure): a half-manual pair is
+        // HAL-undefined, so the missing side is filled with a clamped default
+        // instead of sending AE_MODE_OFF with a single parameter.
+        val (finalIso, finalShutter) =
+            ManualExposure.complete(clampedIso, clampedShutter, caps?.isoRange, caps?.exposureRangeNs)
         _settings.value =
             _settings.value.copy(
-                iso = clampedIso,
-                shutterSpeedNs = clampedShutter,
+                iso = finalIso,
+                shutterSpeedNs = finalShutter,
                 focusDistance = clampedFocus,
                 whiteBalanceMode = wb,
             )
+    }
+
+    /** Back to full-auto exposure (clears both ISO and shutter speed). */
+    fun clearExposureManual() {
+        _settings.value = _settings.value.copy(iso = null, shutterSpeedNs = null)
     }
 
     /** AE exposure-compensation index, clamped to the active lens range. */
@@ -475,6 +519,89 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         fun coerceSaveFormat(format: SaveFormat, lens: CameraLensInfo): SaveFormat =
             if (lens.capabilities.rawCapability?.supported == true) format
             else SaveFormat.JPEG
+
+        /**
+         * One bindable lens entry. [chars] are the characteristics to probe
+         * (physical characteristics for sub-cameras); flash availability is
+         * always inherited from the logical camera because the flash unit is
+         * shared and physical cameras report none.
+         */
+        fun addLensCandidate(
+            lenses: MutableList<CameraLensInfo>,
+            id: String,
+            logicalId: String,
+            physicalId: String?,
+            chars: CameraCharacteristics,
+            logicalFlash: Boolean,
+        ) {
+            val caps = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+            val facing = chars.get(CameraCharacteristics.LENS_FACING)
+            val isFront = facing == CameraCharacteristics.LENS_FACING_FRONT
+            val focalLengths =
+                chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+            // Logical cameras keep the legacy 4.5mm fallback so a missing table
+            // can never yield zero lenses; physicals without one are skipped.
+            val focalLength = focalLengths?.firstOrNull() ?: if (physicalId == null) 4.5f else return
+            val minFocus =
+                chars.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
+
+            val type =
+                when {
+                    isFront -> CameraLensType.FRONT
+                    minFocus >= 10f -> CameraLensType.MACRO
+                    focalLength < 3.5f -> CameraLensType.ULTRAWIDE
+                    focalLength > 6.5f -> CameraLensType.TELEPHOTO
+                    else -> CameraLensType.WIDE
+                }
+
+            val manualSensor =
+                caps?.contains(
+                    CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR
+                ) ?: false
+            val isoR: Range<Int>? =
+                chars.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+            val expR: Range<Long>? =
+                chars.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+            val awb =
+                chars.get(CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES)?.toList()
+                    ?: emptyList()
+            val maxZoom =
+                chars.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f
+            val evRange: Range<Int>? =
+                chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)
+            val evStep =
+                chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)
+                    ?.toDouble()?.toFloat() ?: 0f
+            val apertures =
+                chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)?.toList()
+                    ?: emptyList()
+
+            lenses.add(
+                CameraLensInfo(
+                    id = id,
+                    type = type,
+                    focalLength = focalLength,
+                    isFront = isFront,
+                    capabilities =
+                        LensCapabilities(
+                            supportsManualSensor = manualSensor,
+                            isoRange = isoR?.let { it.lower..it.upper },
+                            exposureRangeNs = expR?.let { it.lower..it.upper },
+                            minFocusDistance = minFocus,
+                            awbModes = awb,
+                            hasFlash = logicalFlash,
+                            maxZoomRatio = maxZoom.coerceAtLeast(1f),
+                            exposureCompRange = evRange?.let { it.lower..it.upper },
+                            exposureCompStep = evStep,
+                            highSpeedVideo = bestHighSpeedVideo(chars),
+                            rawCapability = probeRawCapability(chars),
+                            apertures = apertures,
+                        ),
+                    logicalCameraId = logicalId,
+                    physicalCameraId = physicalId,
+                )
+            )
+        }
 
         /**
          * Sensor-RAW probe: REQUEST_AVAILABLE_CAPABILITIES_RAW plus at least

@@ -1,4 +1,11 @@
-# Fcam pro — 設計概要と実装状況（v2.2.1）
+# Fcam pro — 設計概要と実装状況（v2.2.1＋）
+
+## 物理カメラ対応・ISO原子性・プロUI（未リリース分）
+
+- **物理カメラ列挙（Galaxy 望遠等）**: `cameraIdList` には論理カメラしか出ない端末向けに、`getPhysicalCameraIds()`（API 28+、それ未満は論理のみ）でサブカメラを列挙してレンズ化。`CameraLensInfo` に `logicalCameraId`（セレクタ一致用）＋`physicalCameraId`（`setPhysicalCameraId` 用、直接 bind 可は null）を追加。セレクタは論理 ID で一致させ、Preview／ImageCapture／VideoCapture の各 Builder に物理 ID を適用（API ガード付き）。物理側の特性（焦点距離・手動範囲・RAW・高速・絞り）で能力判定し、フラッシュ可否のみ論理側から継承（共有ユニットのため物理側は報告なし）。同一物理 ID の重複登録を排除し、論理→物理の順でソート。BG 録画サービスも `EXTRA_PHYSICAL_CAMERA_ID` で引き継ぎ。
+- **ISO 原子性**：`ManualExposure.complete()` で露出の手動化を不可分に（片方設定→もう片方を既定値 ISO 100／1/60 で補完、片方 Auto→両方 Auto）。従来の半手動（AE OFF＋片側パラメータのみ）は HAL 未定義動作だった。UI の ISO・速度の Auto ボタンは `clearExposureManual()` に変更。EV 表示条件・プロファイルは従来どおり。
+- **絞り値表示**：`LENS_INFO_AVAILABLE_APERTURES` を取得し、プロ UI のクイック行に F値表示（可変絞り制御は対象外、表示のみ）。
+- **プロ UI（Sony 風）**：プロモード ON（写真・動画）で専用レイアウトに切替。黒背景＋縮小プレビュー、プレビュー上部に状態帯（バッテリー／モード／空き容量／焦点距離mm）、直下に SS・F値・EV・ISO クイック行（SS/ISO タップで手動化切替、EV タップで 0 リセット）、設定集中パネル（既存 `ManualPanel` をスクロール内包＋縦幅圧縮）＋シャッター。スマホ縦は上下、スマホ横は左右、タブレット縦は「プレビュー＋右端直下シャッター｜パネル」の 3 ペイン、タブレット横は左右。プレビュー面（`AndroidView`＋タップ／ピンチ＋装飾）は `PreviewSurface`／`PreviewDecor` に切り出して通常・プロ両経路で共用。通常 UI（非プロ）は従来のまま。
 
 ## 互換性ハードニング（v2.2.1: v2.2.0 リリース後の精査・修正）
 

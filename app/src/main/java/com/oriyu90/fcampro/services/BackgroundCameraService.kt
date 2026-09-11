@@ -61,6 +61,7 @@ class BackgroundCameraService : LifecycleService() {
     private var tickerJob: Job? = null
     private var lensFront = false
     private var cameraId: String? = null
+    private var physicalCameraId: String? = null
     private var targetRotation: Int = android.view.Surface.ROTATION_0
     // Guards against two rapid start() calls queuing two bind sequences (the second
     // would overwrite `recording` and leak the first Recording).
@@ -89,6 +90,7 @@ class BackgroundCameraService : LifecycleService() {
 
         lensFront = intent?.getBooleanExtra(EXTRA_LENS_FRONT, false) ?: false
         cameraId = intent?.getStringExtra(EXTRA_CAMERA_ID)
+        physicalCameraId = intent?.getStringExtra(EXTRA_PHYSICAL_CAMERA_ID)
         targetRotation =
             intent?.getIntExtra(EXTRA_TARGET_ROTATION, android.view.Surface.ROTATION_0)
                 ?: android.view.Surface.ROTATION_0
@@ -147,9 +149,17 @@ class BackgroundCameraService : LifecycleService() {
                     )
                     .build()
             val videoCapture =
-                VideoCapture.withOutput(recorder).also {
-                    runCatching { it.targetRotation = targetRotation }
-                }
+                VideoCapture.Builder(recorder).also { builder ->
+                    runCatching { builder.setTargetRotation(targetRotation) }
+                    physicalCameraId?.let { pid ->
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            runCatching {
+                                androidx.camera.camera2.interop.Camera2Interop.Extender(builder)
+                                    .setPhysicalCameraId(pid)
+                            }
+                        }
+                    }
+                }.build()
             val selector = resolveSelector()
             provider.bindToLifecycle(this, selector, videoCapture)
             beginRecord(videoCapture)
@@ -402,6 +412,7 @@ class BackgroundCameraService : LifecycleService() {
         const val ACTION_STOP = "com.oriyu90.fcampro.action.STOP_BG_RECORDING"
         const val EXTRA_LENS_FRONT = "com.oriyu90.fcampro.extra.LENS_FRONT"
         const val EXTRA_CAMERA_ID = "com.oriyu90.fcampro.extra.CAMERA_ID"
+        const val EXTRA_PHYSICAL_CAMERA_ID = "com.oriyu90.fcampro.extra.PHYSICAL_CAMERA_ID"
         const val EXTRA_TARGET_ROTATION = "com.oriyu90.fcampro.extra.TARGET_ROTATION"
 
         private val _running = MutableStateFlow(false)
@@ -411,12 +422,14 @@ class BackgroundCameraService : LifecycleService() {
             context: Context,
             lensFront: Boolean = false,
             cameraId: String? = null,
+            physicalCameraId: String? = null,
             targetRotation: Int = android.view.Surface.ROTATION_0,
         ) {
             val intent =
                 Intent(context, BackgroundCameraService::class.java)
                     .putExtra(EXTRA_LENS_FRONT, lensFront)
                     .putExtra(EXTRA_CAMERA_ID, cameraId)
+                    .putExtra(EXTRA_PHYSICAL_CAMERA_ID, physicalCameraId)
                     .putExtra(EXTRA_TARGET_ROTATION, targetRotation)
             ContextCompat.startForegroundService(context, intent)
         }

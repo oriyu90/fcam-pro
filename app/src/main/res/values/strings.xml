@@ -41,6 +41,7 @@
     <string name="label_iso">ISO</string>
     <string name="label_shutter">Speed</string>
     <string name="label_focus">Focus</string>
+    <string name="label_aperture">Aperture</string>
     <string name="label_wb">WB</string>
     <string name="label_shutter_volume">Shutter volume</string>
     <string name="label_mic">Mic</string>
