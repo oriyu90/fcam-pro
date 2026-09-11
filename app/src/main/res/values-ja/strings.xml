@@ -45,6 +45,8 @@
     <string name="label_wb">WB</string>
     <string name="label_shutter_volume">シャッター音量</string>
     <string name="label_mic">マイク</string>
+    <string name="pro_hint_select">アイコンをタップして調整</string>
+    <string name="pro_ev_disabled">露出マニュアル中は無効</string>
     <string name="label_save_format">保存形式</string>
     <string name="format_jpeg">JPEG</string>
     <string name="format_jpeg_raw">JPEG+RAW</string>
@@ -162,4 +164,7 @@
     <string name="notif_recording_elapsed">バックグラウンドで録画中 · %1$s</string>
     <string name="notif_starting_text">バックグラウンド録画を開始しています…</string>
     <string name="notif_stop">停止</string>
+    <string name="notif_pause">一時停止</string>
+    <string name="notif_resume">再開</string>
+    <string name="notif_paused">一時停止中 · %1$s</string>
 </resources>

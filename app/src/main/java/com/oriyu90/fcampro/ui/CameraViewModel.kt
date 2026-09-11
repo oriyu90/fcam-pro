@@ -48,6 +48,27 @@ object ZoomRatios {
         if (!factor.isFinite() || factor <= 0f) return current.coerceIn(MIN, hi)
         return (current * factor).coerceIn(MIN, hi)
     }
+
+    /**
+     * True when a tap lands inside the displayed AF box. The box is centered
+     * on the focus point and clamped into the preview, mirroring the display
+     * math: inside = unlock, outside = refocus there.
+     */
+    fun isTapInFocusBox(
+        tapX: Float,
+        tapY: Float,
+        fpX: Float,
+        fpY: Float,
+        halfPx: Float,
+        viewW: Float,
+        viewH: Float,
+    ): Boolean {
+        if (halfPx <= 0f || viewW <= 0f || viewH <= 0f) return false
+        val cx = fpX.coerceIn(halfPx, (viewW - halfPx).coerceAtLeast(halfPx))
+        val cy = fpY.coerceIn(halfPx, (viewH - halfPx).coerceAtLeast(halfPx))
+        return tapX >= cx - halfPx && tapX <= cx + halfPx &&
+            tapY >= cy - halfPx && tapY <= cy + halfPx
+    }
 }
 
 /** Pure exposure-compensation helpers (unit-testable). */

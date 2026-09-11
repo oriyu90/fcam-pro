@@ -59,6 +59,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -204,6 +205,8 @@ fun CameraScreen(
     var panoAzimuth by remember { mutableStateOf<Float?>(null) }
     var currentAzimuth by remember { mutableStateOf<Float?>(null) }
     var lastPanoCaptureAt by remember { mutableStateOf(0L) }
+    // Pro settings item selected via the icon row/strip (null = hint).
+    var proItem by remember { mutableStateOf<ProItem?>(null) }
     // Low-RAM devices stitch smaller, fewer frames to avoid OOM kills.
     val memoryClassMb =
         remember {
@@ -1183,16 +1186,27 @@ fun CameraScreen(
         }
     }
 
-    // --- Focus lock (tap to lock, tap again to release) ---------------
+    // --- Focus lock (tap locked box to release, tap elsewhere to refocus) ---
     fun onPreviewTap(offset: androidx.compose.ui.geometry.Offset) {
         val cam = camera ?: return
         // Manual focus distance overrides tap-to-focus.
         if (settings.isManualMode && settings.focusDistance != null) return
-        if (focusLocked) {
+        val halfPx = with(density) { 34.dp.toPx() }
+        val w = previewSize.width.toFloat()
+        val h = previewSize.height.toFloat()
+        val fp = focusPoint
+        if (focusLocked && fp != null &&
+            ZoomRatios.isTapInFocusBox(offset.x, offset.y, fp.x, fp.y, halfPx, w, h)
+        ) {
             runCatching { cam.cameraControl.cancelFocusAndMetering() }
             focusLocked = false
             focusPoint = null
             return
+        }
+        if (focusLocked) {
+            // Locked but tapped outside the box: move the lock there instead
+            // of dropping it.
+            runCatching { cam.cameraControl.cancelFocusAndMetering() }
         }
         val point = previewView.meteringPointFactory.createPoint(offset.x, offset.y)
         val action =
@@ -1220,6 +1234,42 @@ fun CameraScreen(
         remember {
             context.getSystemService(android.content.ClipboardManager::class.java)
         }
+
+    fun toggleTimelapse() {
+        if (!timelapseActive) {
+            timelapseActive = true
+            msg(R.string.snack_timelapse_started, appSettings.timelapseIntervalSeconds)
+        } else {
+            timelapseActive = false
+            msg(R.string.snack_timelapse_stopped)
+        }
+    }
+
+    fun toggleBackground() {
+        if (bgRunning) {
+            BackgroundCameraService.stop(context)
+            msg(R.string.snack_bg_record_stopped)
+        } else if (noCameraAvailable) {
+            msg(R.string.snack_bg_record_unsupported)
+        } else if (
+            ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.CAMERA,
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            msg(R.string.snack_bg_record_no_permission)
+        } else {
+            BackgroundCameraService.start(
+                context,
+                lensFront = settings.isFrontCamera,
+                cameraId = settings.currentLens?.logicalCameraId,
+                physicalCameraId = settings.currentLens?.physicalCameraId,
+                targetRotation =
+                    previewView.display?.rotation ?: android.view.Surface.ROTATION_0,
+            )
+            msg(R.string.snack_bg_record_started)
+        }
+    }
 
     // ============================ UI ============================
     Scaffold(
@@ -1349,9 +1399,9 @@ fun CameraScreen(
             }
         }
 
-        // Pro mode shrinks the preview onto a black stage (Sony-style); the
-        // AndroidView node itself stays at this one call site so no
-        // reparenting crash can occur — only the container size changes.
+        // Pro mode shrinks the preview onto a black stage with edge margins
+        // (Sony-style); the AndroidView node itself stays at this one call
+        // site so no reparenting crash can occur — only containers change.
         val proMode =
             external == null &&
                 settings.isManualMode &&
@@ -1359,32 +1409,207 @@ fun CameraScreen(
                     settings.cameraMode == CameraMode.VIDEO)
         val cfg = LocalConfiguration.current
         val proLandscape = cfg.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val compact = cfg.smallestScreenWidthDp < 600
         val streamAspect =
             if (settings.aspectRatio == AspectRatio.RATIO_16_9) 16f / 9f else 4f / 3f
-        Box(modifier = Modifier.fillMaxSize().background(Color.Black).padding(padding)) {
-            Box(
-                when {
-                    !proMode -> Modifier.fillMaxSize()
-                    !proLandscape ->
-                        Modifier.fillMaxWidth().aspectRatio(streamAspect)
-                            .align(Alignment.TopCenter)
-                    else ->
-                        Modifier.fillMaxHeight().aspectRatio(streamAspect)
-                            .align(Alignment.CenterStart)
-                }
-            ) {
+
+        val shared =
+            SharedActions(
+                viewModel = viewModel,
+                settings = settings,
+                availableLenses = availableLenses,
+                profiles = profiles,
+                bgRunning = bgRunning,
+                timelapseActive = timelapseActive,
+                isCapturing = isCapturing || slowMoProcessing,
+                isRecording = recording != null,
+                gridOn = appSnapshot.gridLines,
+                mediaThumb = thumb,
+                hasMedia = lastMedia != null,
+                batteryPct = batteryPct,
+                zoomRatio = zoomRatio,
+                maxZoom = maxZoomRatio,
+                onResetZoom = ::resetZoom,
+                onToggleGrid = { appSettings.gridLines = !appSettings.gridLines },
+                onOpenGallery = ::openGallery,
+                onCapturePhoto = ::capturePhoto,
+                onToggleRecording = ::toggleRecording,
+                onToggleTimelapse = ::toggleTimelapse,
+                panoActive = panoActive,
+                panoCount = panoFrames.size,
+                panoMax = panoMaxFrames,
+                onTogglePanorama = ::togglePanorama,
+                onCancelPanorama = ::cancelPanorama,
+                onToggleBackground = ::toggleBackground,
+                onOpenSettings = onOpenSettings,
+            )
+
+        @Composable
+        fun ProPreviewBox(modifier: Modifier) {
+            Box(modifier) {
                 PreviewSurface(Modifier.fillMaxSize())
                 PreviewDecor()
-                if (proMode) {
-                    ProStatusStrip(
-                        batteryPct = batteryPct,
-                        mode = settings.cameraMode,
-                        lens = settings.currentLens,
-                        hasMedia = lastMedia != null,
+                ProStatusTexts(shared, Modifier.align(Alignment.TopStart))
+                ProLensTexts(shared, Modifier.align(Alignment.CenterEnd))
+            }
+        }
+
+        @Composable
+        fun ProPanelColumn(modifier: Modifier, showShutter: Boolean, showToolbar: Boolean) {
+            Column(
+                modifier =
+                    modifier.background(Color.Black)
+                        .windowInsetsPadding(WindowInsets.safeDrawing)
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                if (showToolbar) {
+                    ProToolbarBlock(
+                        shared,
+                        Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                    )
+                }
+                Box(
+                    Modifier.fillMaxWidth().weight(1f)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    ProControlArea(shared, proItem)
+                }
+                if (!proLandscape) {
+                    ProIconSelector(
+                        shared,
+                        proItem,
+                        { proItem = it },
+                        vertical = false,
+                        modifier = Modifier.padding(vertical = 6.dp),
+                    )
+                }
+                IphoneModeTabs(shared)
+                if (showShutter) {
+                    ShutterBar(shared)
+                } else {
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        MediaThumbButton(
+                            shared.mediaThumb,
+                            shared.hasMedia,
+                            shared.onOpenGallery,
+                            size = 44.dp,
+                        )
+                        FrontBackButton(shared)
+                    }
+                }
+            }
+        }
+
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black).padding(padding)) {
+            if (!proMode) {
+                Box(Modifier.fillMaxSize()) {
+                    PreviewSurface(Modifier.fillMaxSize())
+                    PreviewDecor()
+                }
+            } else if (!proLandscape && compact) {
+                // Portrait: toolbar, gapped preview, summary, panel.
+                Column(Modifier.fillMaxSize()) {
+                    ProToolbarBlock(
+                        shared,
+                        Modifier.fillMaxWidth()
+                            .windowInsetsPadding(WindowInsets.safeDrawing)
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
+                    ProPreviewBox(
+                        Modifier.fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .aspectRatio(streamAspect)
+                            .align(Alignment.CenterHorizontally)
+                    )
+                    ProSummaryLine(shared, Modifier.align(Alignment.CenterHorizontally))
+                    ProPanelColumn(
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        showShutter = true,
+                        showToolbar = false,
+                    )
+                }
+            } else if (proLandscape) {
+                // Landscape: slim icon strip in the left gap.
+                Row(Modifier.fillMaxSize()) {
+                    Column(
+                        Modifier.width(if (compact) 76.dp else 84.dp).fillMaxHeight()
+                            .background(Color.Black)
+                            .windowInsetsPadding(WindowInsets.safeDrawing),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically),
+                    ) {
+                        ProIconSelector(
+                            shared,
+                            proItem,
+                            { proItem = it },
+                            vertical = true,
+                        )
+                    }
+                    Column(
+                        Modifier.weight(if (compact) 1f else 1.25f),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        ProPreviewBox(
+                            Modifier.fillMaxHeight()
+                                .padding(vertical = 12.dp)
+                                .aspectRatio(streamAspect)
+                        )
+                        ProSummaryLine(shared)
+                    }
+                    ProPanelColumn(
+                        modifier = Modifier.fillMaxHeight().weight(1f),
+                        showShutter = true,
+                        showToolbar = true,
+                    )
+                }
+            } else {
+                // Tablet portrait: shutter just below the preview's right edge.
+                Row(Modifier.fillMaxSize()) {
+                    Column(Modifier.fillMaxHeight().weight(1.3f)) {
+                        ProToolbarBlock(
+                            shared,
+                            Modifier.fillMaxWidth()
+                                .windowInsetsPadding(WindowInsets.safeDrawing)
+                                .padding(horizontal = 12.dp, vertical = 4.dp),
+                        )
+                        ProPreviewBox(
+                            Modifier.fillMaxWidth()
+                                .padding(horizontal = 16.dp)
+                                .aspectRatio(streamAspect)
+                                .align(Alignment.CenterHorizontally)
+                        )
+                        ProSummaryLine(shared, Modifier.align(Alignment.CenterHorizontally))
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .padding(horizontal = 32.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            ShutterButton(
+                                isVideo = shared.isRecordMode(),
+                                isRecording = shared.isRecording,
+                                isCapturing = shared.isCapturing,
+                                enabled = !shared.bgRunning,
+                                size = 78.dp,
+                                onClick = { shared.onShutter() },
+                            )
+                        }
+                        Spacer(Modifier.weight(1f))
+                    }
+                    ProPanelColumn(
+                        modifier = Modifier.fillMaxHeight().weight(1f),
+                        showShutter = false,
+                        showToolbar = false,
                     )
                 }
             }
 
+            if (!proMode) {
             CameraOverlay(
                 viewModel = viewModel,
                 settings = settings,
@@ -1410,52 +1635,17 @@ fun CameraScreen(
                 onOpenGallery = ::openGallery,
                 onCapturePhoto = ::capturePhoto,
                 onToggleRecording = ::toggleRecording,
-                onToggleTimelapse = {
-                    if (!timelapseActive) {
-                        timelapseActive = true
-                        msg(
-                            R.string.snack_timelapse_started,
-                            appSettings.timelapseIntervalSeconds,
-                        )
-                    } else {
-                        timelapseActive = false
-                        msg(R.string.snack_timelapse_stopped)
-                    }
-                },
+                onToggleTimelapse = ::toggleTimelapse,
                 panoActive = panoActive,
                 panoCount = panoFrames.size,
                 panoMax = panoMaxFrames,
                 onTogglePanorama = ::togglePanorama,
                 onCancelPanorama = ::cancelPanorama,
-                onToggleBackground = {
-                    if (bgRunning) {
-                        BackgroundCameraService.stop(context)
-                        msg(R.string.snack_bg_record_stopped)
-                    } else if (noCameraAvailable) {
-                        msg(R.string.snack_bg_record_unsupported)
-                    } else if (
-                        ContextCompat.checkSelfPermission(
-                            context,
-                            android.Manifest.permission.CAMERA,
-                        ) != android.content.pm.PackageManager.PERMISSION_GRANTED
-                    ) {
-                        msg(R.string.snack_bg_record_no_permission)
-                    } else {
-                        BackgroundCameraService.start(
-                            context,
-                            lensFront = settings.isFrontCamera,
-                            cameraId = settings.currentLens?.logicalCameraId,
-                            physicalCameraId = settings.currentLens?.physicalCameraId,
-                            targetRotation =
-                                previewView.display?.rotation
-                                    ?: android.view.Surface.ROTATION_0,
-                        )
-                        msg(R.string.snack_bg_record_started)
-                    }
-                },
+                onToggleBackground = ::toggleBackground,
                 onOpenSettings = onOpenSettings,
                 onCancelExternal = { onExternalResult(false, null) },
             )
+            }
         }
     }
 }

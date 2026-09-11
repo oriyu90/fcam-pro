@@ -34,7 +34,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AutoMode
 import androidx.compose.material.icons.filled.BatteryStd
 import androidx.compose.material.icons.filled.Cameraswitch
@@ -60,21 +59,14 @@ import androidx.compose.material.icons.filled.Timelapse
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.UnfoldMore
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
-import androidx.compose.material3.ElevatedFilterChip
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -196,16 +188,8 @@ fun CameraOverlay(
             onOpenSettings = onOpenSettings,
         )
 
-    // Pro (manual) mode uses the dedicated Sony-style overlay: transparent
-    // spacers over the shared preview plus a concentrated panel.
-    if (external == null &&
-        settings.isManualMode &&
-        isStillMode(settings.cameraMode)
-    ) {
-        ProModeOverlay(shared)
-        return
-    }
-
+    // Pro (manual) mode is composed by CameraScreen (ProScreen layouts);
+    // this overlay only serves the normal phone/tablet panels.
     when (layout) {
         Layout.PHONE_PORTRAIT -> PhonePortrait(shared)
         Layout.LARGE_PORTRAIT ->
@@ -236,7 +220,7 @@ fun CameraOverlay(
 }
 
 /** Bundle of state + callbacks passed to the per-layout composables. */
-private class SharedActions(
+internal class SharedActions(
     val viewModel: CameraViewModel,
     val settings: CameraSettings,
     val availableLenses: List<CameraLensInfo>,
@@ -300,11 +284,10 @@ private fun PhonePortrait(s: SharedActions) {
                     .windowInsetsPadding(WindowInsets.safeDrawing)
                     .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
-            if (s.settings.isManualMode && isStillMode(s.settings.cameraMode)) {
-                ManualPanel(s.viewModel, s.settings, s.profiles)
-            }
             if (s.settings.cameraMode == CameraMode.PANORAMA) {
                 PanoProgressRow(s)
+            } else if (s.settings.cameraMode == CameraMode.OTHERS) {
+                OthersMenu(s = s, twoPerRow = false)
             } else {
                 // Pinch-zoom pill only once zoomed, so the idle view stays clean.
                 if (s.zoomRatio > 1.01f) {
@@ -334,7 +317,7 @@ private fun isStillMode(mode: CameraMode): Boolean =
 
 /** Bottom shutter bar: thumbnail | large shutter | front-back switch. */
 @Composable
-private fun ShutterBar(s: SharedActions) {
+internal fun ShutterBar(s: SharedActions) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -400,7 +383,7 @@ private fun LensZoomPills(
 
 /** iPhone-style centered mode selector. */
 @Composable
-private fun IphoneModeTabs(s: SharedActions) {
+internal fun IphoneModeTabs(s: SharedActions) {
     LazyRow(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally),
@@ -414,7 +397,9 @@ private fun IphoneModeTabs(s: SharedActions) {
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                 maxLines = 1,
-                modifier = Modifier.clickable { s.viewModel.setMode(mode) }.padding(vertical = 6.dp),
+                modifier = Modifier.clickable {
+                    s.viewModel.setMode(mode)
+                }.padding(vertical = 6.dp),
             )
         }
     }
@@ -604,7 +589,7 @@ private fun androidx.compose.foundation.layout.BoxScope.CollapsedCluster(
 
 @Composable
 private fun PanelBody(s: SharedActions, verticalTabs: Boolean, othersTwoPerRow: Boolean) {
-    // Manual mode is rendered by the dedicated pro layout (ProCameraUi);
+    // Manual mode is rendered by the dedicated pro screen (ProScreen.kt);
     // this shared body only serves non-manual phone/tablet panels.
     val lenses = s.availableLenses.filter { it.isFront == s.settings.isFrontCamera }
     // Pinch-zoom state is always visible here when the lens supports zoom, so the
@@ -671,7 +656,7 @@ private fun PanelBody(s: SharedActions, verticalTabs: Boolean, othersTwoPerRow: 
 // ============================ ICONS ============================
 
 @Composable
-private fun ControlIcons(s: SharedActions, columns: Int, modifier: Modifier = Modifier) {
+internal fun ControlIcons(s: SharedActions, columns: Int, modifier: Modifier = Modifier) {
     val photoOrVideo = isStillMode(s.settings.cameraMode)
     val caps = s.settings.currentLens?.capabilities
 
@@ -794,7 +779,7 @@ private fun ControlIcons(s: SharedActions, columns: Int, modifier: Modifier = Mo
 }
 
 @Composable
-private fun FrontBackButton(s: SharedActions) {
+internal fun FrontBackButton(s: SharedActions) {
     IconButton(onClick = { s.viewModel.toggleFrontCamera() }) {
         Icon(
             Icons.Default.Cameraswitch,
@@ -805,7 +790,7 @@ private fun FrontBackButton(s: SharedActions) {
 }
 
 @Composable
-private fun BatteryPill(pct: Int?) {
+internal fun BatteryPill(pct: Int?) {
     if (pct == null) return
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -870,7 +855,7 @@ private fun ZoomPill(zoomRatio: Float, maxZoom: Float, enabled: Boolean, onReset
 }
 
 @Composable
-private fun MediaThumbButton(
+internal fun MediaThumbButton(
     thumb: ImageBitmap?,
     hasMedia: Boolean,
     onClick: () -> Unit,
@@ -978,7 +963,7 @@ private fun ModeTabsColumn(s: SharedActions) {
 }
 
 @Composable
-private fun ModeTab(s: SharedActions, mode: CameraMode, res: Int) {
+internal fun ModeTab(s: SharedActions, mode: CameraMode, res: Int) {
     val selected = s.settings.cameraMode == mode
     TextButton(onClick = { s.viewModel.setMode(mode) }) {
         Text(
@@ -1073,7 +1058,7 @@ private fun OthersMenuItem(icon: ImageVector, text: String, onClick: () -> Unit)
 // ============================ SHUTTER ============================
 
 @Composable
-private fun ShutterButton(
+internal fun ShutterButton(
     isVideo: Boolean,
     isRecording: Boolean,
     isCapturing: Boolean,
@@ -1150,251 +1135,38 @@ private fun ExternalCaptureBar(
     }
 }
 
-// ============================ MANUAL PANEL ============================
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ManualPanel(
-    viewModel: CameraViewModel,
-    settings: CameraSettings,
-    profiles: List<CameraProfile>,
-) {
-    val caps = settings.currentLens?.capabilities ?: return
-    var showSave by remember { mutableStateOf(false) }
-    var editProfile by remember { mutableStateOf<CameraProfile?>(null) }
-
-    fun update(iso: Int?, shutter: Long?, focus: Float?, wb: Int?) =
-        viewModel.updateManualSettings(iso, shutter, focus, wb)
-
-    Column(
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            TextButton(
-                onClick = { viewModel.resetManualSettings() },
-                enabled =
-                    settings.iso != null ||
-                        settings.shutterSpeedNs != null ||
-                        settings.focusDistance != null ||
-                        settings.whiteBalanceMode != null ||
-                        settings.exposureCompensation != 0,
-            ) {
-                Text(stringResource(R.string.manual_all_auto))
-            }
+private fun lensLabel(type: CameraLensType): String =
+    stringResource(
+        when (type) {
+            CameraLensType.ULTRAWIDE -> R.string.lens_ultrawide
+            CameraLensType.WIDE -> R.string.lens_wide
+            CameraLensType.TELEPHOTO -> R.string.lens_telephoto
+            CameraLensType.MACRO -> R.string.lens_macro
+            CameraLensType.FRONT -> R.string.lens_front
         }
+    )
 
-        // Still save format: only on lenses whose sensor reports RAW output.
-        // JPEG-only lenses hide the selector entirely (JPEG is implied).
-        if (caps.rawCapability?.supported == true) {
-            SaveFormatSelector(
-                selected = settings.saveFormat,
-                bitDepth = caps.rawCapability.bitDepth,
-                onSelect = { viewModel.setSaveFormat(it) },
-            )
-        }
-
-        val isoRange = caps.isoRange ?: 50..3200
-        LabeledSlider(
-            label = stringResource(R.string.label_iso),
-            valueText = settings.iso?.toString() ?: stringResource(R.string.value_auto),
-            value = settings.iso?.toFloat() ?: isoRange.first.toFloat(),
-            range = isoRange.first.toFloat()..isoRange.last.toFloat(),
-            isAuto = settings.iso == null,
-            // Exposure is atomic: clearing either side returns both to auto.
-            onAuto = { viewModel.clearExposureManual() },
-            onChange = {
-                update(it.toInt(), settings.shutterSpeedNs, settings.focusDistance, settings.whiteBalanceMode)
-            },
-        )
-
-        val expRange = caps.exposureRangeNs ?: 125_000L..1_000_000_000L
-        val shutterText =
-            settings.shutterSpeedNs?.let { "1/${(1_000_000_000L / it).coerceAtLeast(1)}s" }
-                ?: stringResource(R.string.value_auto)
-        LabeledSlider(
-            label = stringResource(R.string.label_shutter),
-            valueText = shutterText,
-            value = settings.shutterSpeedNs?.toFloat() ?: expRange.first.toFloat(),
-            range = expRange.first.toFloat()..expRange.last.toFloat(),
-            isAuto = settings.shutterSpeedNs == null,
-            // Exposure is atomic: clearing either side returns both to auto.
-            onAuto = { viewModel.clearExposureManual() },
-            onChange = {
-                update(settings.iso, it.toLong(), settings.focusDistance, settings.whiteBalanceMode)
-            },
-        )
-
-        // Exposure compensation appears directly below the exposure controls,
-        // but only while exposure itself is fully auto (ISO + speed unset).
-        // With AE_MODE_OFF the compensation index is ignored by the HAL, so
-        // showing it then would promise an adjustment that never applies.
-        if (settings.iso == null && settings.shutterSpeedNs == null) {
-            val evRange = caps.exposureCompRange
-            if (evRange != null) {
-                val evStep = caps.exposureCompStep.takeIf { it > 0f } ?: (1f / 3f)
-                LabeledSlider(
-                    label = stringResource(R.string.label_ev),
-                    valueText = ExposureComp.evText(settings.exposureCompensation, evStep),
-                    value = settings.exposureCompensation.toFloat(),
-                    range = evRange.first.toFloat()..evRange.last.toFloat(),
-                    steps = (evRange.last - evRange.first - 1).coerceAtLeast(0),
-                    onChange = { viewModel.updateExposureCompensation(it.roundToInt()) },
-                )
-            }
-        }
-
-        val focusMax = caps.minFocusDistance.takeIf { it > 0f } ?: 10f
-        LabeledSlider(
-            label = stringResource(R.string.label_focus),
-            valueText =
-                settings.focusDistance?.let { "%.1f".format(it) }
-                    ?: stringResource(R.string.value_auto),
-            value = settings.focusDistance ?: 0f,
-            range = 0f..focusMax,
-            isAuto = settings.focusDistance == null,
-            onAuto = { update(settings.iso, settings.shutterSpeedNs, null, settings.whiteBalanceMode) },
-            onChange = {
-                update(settings.iso, settings.shutterSpeedNs, it, settings.whiteBalanceMode)
-            },
-        )
-
-        if (caps.awbModes.size > 1) {
-            LabeledSlider(
-                label = stringResource(R.string.label_wb),
-                valueText =
-                    settings.whiteBalanceMode?.toString() ?: stringResource(R.string.value_auto),
-                value = settings.whiteBalanceMode?.toFloat() ?: 1f,
-                range = 1f..8f,
-                steps = 6,
-                isAuto = settings.whiteBalanceMode == null,
-                onAuto = { update(settings.iso, settings.shutterSpeedNs, settings.focusDistance, null) },
-                onChange = {
-                    update(settings.iso, settings.shutterSpeedNs, settings.focusDistance, it.toInt())
-                },
-            )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text =
-                    stringResource(R.string.label_mic) +
-                        ": " +
-                        stringResource(
-                            if (settings.audioChannels == 2) R.string.mic_stereo
-                            else R.string.mic_mono
-                        ),
-                color = Color.White,
-                modifier = Modifier.width(120.dp),
-                style = MaterialTheme.typography.labelSmall,
-            )
-            Switch(
-                checked = settings.audioChannels == 2,
-                onCheckedChange = { viewModel.cycleAudioChannels() },
-            )
-        }
-
-        Button(onClick = { showSave = true }, modifier = Modifier.align(Alignment.End)) {
-            Text(stringResource(R.string.save_profile))
-        }
-
-        if (profiles.isNotEmpty()) {
-            LazyRow(modifier = Modifier.padding(vertical = 8.dp)) {
-                items(profiles, key = { it.id }) { profile ->
-                    ElevatedFilterChip(
-                        selected = false,
-                        onClick = { viewModel.loadProfile(profile) },
-                        label = {
-                            Text(
-                                profile.name.ifBlank { stringResource(R.string.profile_unnamed) },
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
-                        modifier = Modifier.padding(end = 8.dp),
-                        leadingIcon = {
-                            IconButton(
-                                onClick = { editProfile = profile },
-                                modifier = Modifier.size(24.dp),
-                            ) {
-                                Icon(
-                                    Icons.Default.Edit,
-                                    contentDescription = stringResource(R.string.action_edit),
-                                    modifier = Modifier.size(16.dp),
-                                )
-                            }
-                        },
-                        trailingIcon = {
-                            IconButton(
-                                onClick = { viewModel.deleteProfile(profile.id) },
-                                modifier = Modifier.size(24.dp),
-                            ) {
-                                Icon(
-                                    Icons.Default.Close,
-                                    contentDescription = stringResource(R.string.action_delete),
-                                    modifier = Modifier.size(16.dp),
-                                )
-                            }
-                        },
-                    )
-                }
-            }
-        }
-    }
-
-    if (showSave) {
-        var name by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { showSave = false },
-            title = { Text(stringResource(R.string.save_profile)) },
-            text = {
-                TextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text(stringResource(R.string.profile_name)) },
-                    singleLine = true,
-                )
-            },
-            confirmButton = {
-                Button(onClick = { viewModel.saveProfile(name); showSave = false }) {
-                    Text(stringResource(R.string.action_save))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showSave = false }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            },
-        )
-    }
-
-    editProfile?.let { p ->
-        var name by remember(p.id) { mutableStateOf(p.name) }
-        AlertDialog(
-            onDismissRequest = { editProfile = null },
-            title = { Text(stringResource(R.string.edit_profile_title)) },
-            text = {
-                TextField(value = name, onValueChange = { name = it }, singleLine = true)
-            },
-            confirmButton = {
-                Button(onClick = { viewModel.updateProfileName(p, name); editProfile = null }) {
-                    Text(stringResource(R.string.action_update))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { editProfile = null }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            },
-        )
-    }
+internal enum class ProArrangement {
+    PHONE_PORTRAIT,
+    PHONE_LANDSCAPE,
+    TABLET_PORTRAIT,
+    TABLET_LANDSCAPE,
 }
 
+internal fun proArrangement(compact: Boolean, landscape: Boolean): ProArrangement =
+    when {
+        compact && !landscape -> ProArrangement.PHONE_PORTRAIT
+        compact && landscape -> ProArrangement.PHONE_LANDSCAPE
+        !compact && !landscape -> ProArrangement.TABLET_PORTRAIT
+        else -> ProArrangement.TABLET_LANDSCAPE
+    }
+
+fun formatStorageGb(bytes: Long): String =
+    if (bytes < 0) "--" else "%.1f GB".format(java.util.Locale.US, bytes / 1e9)
+
 @Composable
-private fun SaveFormatSelector(
+internal fun SaveFormatSelector(
     selected: SaveFormat,
     bitDepth: Int?,
     onSelect: (SaveFormat) -> Unit,
@@ -1437,7 +1209,7 @@ private fun SaveFormatSelector(
 }
 
 @Composable
-private fun LabeledSlider(
+internal fun LabeledSlider(
     label: String,
     valueText: String,
     value: Float,
@@ -1497,300 +1269,5 @@ private fun LabeledSlider(
                 Text(stringResource(R.string.manual_set_auto), style = MaterialTheme.typography.labelSmall)
             }
         }
-    }
-}
-
-@Composable
-private fun lensLabel(type: CameraLensType): String =
-    stringResource(
-        when (type) {
-            CameraLensType.ULTRAWIDE -> R.string.lens_ultrawide
-            CameraLensType.WIDE -> R.string.lens_wide
-            CameraLensType.TELEPHOTO -> R.string.lens_telephoto
-            CameraLensType.MACRO -> R.string.lens_macro
-            CameraLensType.FRONT -> R.string.lens_front
-        }
-    )
-
-// ============================ PRO LAYOUT (manual mode) ============================
-
-private enum class ProArrangement {
-    PHONE_PORTRAIT,
-    PHONE_LANDSCAPE,
-    TABLET_PORTRAIT,
-    TABLET_LANDSCAPE,
-}
-
-private fun proArrangement(compact: Boolean, landscape: Boolean): ProArrangement =
-    when {
-        compact && !landscape -> ProArrangement.PHONE_PORTRAIT
-        compact && landscape -> ProArrangement.PHONE_LANDSCAPE
-        !compact && !landscape -> ProArrangement.TABLET_PORTRAIT
-        else -> ProArrangement.TABLET_LANDSCAPE
-    }
-
-/** Free bytes on the photo-storage partition, -1 when unreadable. */
-private fun freeStorageBytes(context: android.content.Context): Long =
-    runCatching { android.os.StatFs(context.filesDir.path).availableBytes }.getOrDefault(-1L)
-
-/** Display text for free storage, e.g. "12.4 GB". Unit-testable. */
-fun formatStorageGb(bytes: Long): String =
-    if (bytes < 0) "--" else "%.1f GB".format(java.util.Locale.US, bytes / 1e9)
-
-private fun modeTabRes(mode: CameraMode): Int =
-    when (mode) {
-        CameraMode.PHOTO -> R.string.tab_photo
-        CameraMode.VIDEO -> R.string.tab_video
-        CameraMode.SLOWMO -> R.string.tab_slowmo
-        CameraMode.PANORAMA -> R.string.tab_panorama
-        CameraMode.OTHERS -> R.string.tab_others
-    }
-
-/**
- * Small status strip overlaid on the top of the shrunken preview:
- * battery | mode | free storage | focal length.
- */
-@Composable
-fun ProStatusStrip(
-    batteryPct: Int?,
-    mode: CameraMode,
-    lens: CameraLensInfo?,
-    hasMedia: Boolean,
-) {
-    val context = LocalContext.current
-    val freeText = remember(hasMedia) { formatStorageGb(freeStorageBytes(context)) }
-    Box(
-        modifier =
-            Modifier.fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(8.dp),
-        contentAlignment = Alignment.TopCenter,
-    ) {
-        Row(
-            modifier =
-                Modifier.background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
-                    .padding(horizontal = 12.dp, vertical = 5.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            BatteryPill(batteryPct)
-            Text(
-                stringResource(modeTabRes(mode)),
-                color = Color.White,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-            )
-            Text(
-                freeText,
-                color = Color.White,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-            )
-            lens?.let {
-                Text(
-                    "%.0fmm".format(java.util.Locale.US, it.focalLength),
-                    color = Color.White.copy(alpha = 0.8f),
-                    style = MaterialTheme.typography.labelSmall,
-                    maxLines = 1,
-                )
-            }
-        }
-    }
-}
-
-/** Quick value row directly under the preview: SS / F / EV / ISO. */
-@Composable
-private fun ProQuickRow(s: SharedActions) {
-    val caps = s.settings.currentLens?.capabilities
-    val evStep = caps?.exposureCompStep?.takeIf { it > 0f } ?: (1f / 3f)
-    val ssText =
-        s.settings.shutterSpeedNs?.let { "1/${(1_000_000_000L / it).coerceAtLeast(1)}" }
-            ?: stringResource(R.string.value_auto)
-    val fText =
-        caps?.apertures?.firstOrNull()?.let { "F%.1f".format(java.util.Locale.US, it) } ?: "--"
-    val evText = ExposureComp.evText(s.settings.exposureCompensation, evStep)
-    val isoText = s.settings.iso?.toString() ?: stringResource(R.string.value_auto)
-    val exposureAuto = s.settings.iso == null
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        ProQuickItem(
-            label = stringResource(R.string.label_shutter),
-            value = ssText,
-            active = !exposureAuto,
-            onClick = { toggleExposureManual(s) },
-        )
-        ProQuickItem(
-            label = stringResource(R.string.label_aperture),
-            value = fText,
-            active = false,
-            onClick = null,
-        )
-        ProQuickItem(
-            label = stringResource(R.string.label_ev),
-            value = evText,
-            active = s.settings.exposureCompensation != 0,
-            onClick = { s.viewModel.updateExposureCompensation(0) },
-        )
-        ProQuickItem(
-            label = stringResource(R.string.label_iso),
-            value = isoText,
-            active = !exposureAuto,
-            onClick = { toggleExposureManual(s) },
-        )
-    }
-}
-
-private fun toggleExposureManual(s: SharedActions) {
-    if (s.settings.iso == null) {
-        val caps = s.settings.currentLens?.capabilities
-        s.viewModel.updateManualSettings(
-            ManualExposure.defaultIso(caps?.isoRange),
-            ManualExposure.defaultShutterNs(caps?.exposureRangeNs),
-            s.settings.focusDistance,
-            s.settings.whiteBalanceMode,
-        )
-    } else {
-        s.viewModel.clearExposureManual()
-    }
-}
-
-@Composable
-private fun ProQuickItem(
-    label: String,
-    value: String,
-    active: Boolean,
-    onClick: (() -> Unit)?,
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier =
-            Modifier.clickable(enabled = onClick != null, onClick = { onClick?.invoke() })
-                .padding(horizontal = 10.dp, vertical = 4.dp),
-    ) {
-        Text(
-            label,
-            color = Color.White.copy(alpha = 0.6f),
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 1,
-        )
-        Text(
-            value,
-            color = if (active) MaterialTheme.colorScheme.primary else Color.White,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
-            maxLines = 1,
-        )
-    }
-}
-
-/** Settings panel: quick row, sliders, mode tabs, shutter (except tablet portrait). */
-@Composable
-private fun ProPanel(
-    s: SharedActions,
-    showShutter: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier =
-            modifier.background(Color.Black)
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(horizontal = 12.dp, vertical = 6.dp)
-    ) {
-        ControlIcons(s = s, columns = 1)
-        ProQuickRow(s)
-        LensZoomPills(
-            lenses = s.availableLenses.filter { it.isFront == s.settings.isFrontCamera },
-            current = s.settings.currentLens,
-            enabled = !s.isRecording && !s.bgRunning,
-            onSelect = { s.viewModel.setLens(it) },
-        )
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            ManualPanel(s.viewModel, s.settings, s.profiles)
-        }
-        IphoneModeTabs(s)
-        if (showShutter) {
-            ShutterBar(s)
-        } else {
-            Row(
-                Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                MediaThumbButton(s.mediaThumb, s.hasMedia, s.onOpenGallery, size = 44.dp)
-                FrontBackButton(s)
-            }
-        }
-    }
-}
-
-/** Sony-style pro overlay: transparent spacers over the shared preview plus a
- * concentrated black panel. The preview surface itself stays in CameraScreen
- * (single AndroidView node); this shell never hosts it. */
-@Composable
-private fun ProModeOverlay(s: SharedActions) {
-    val cfg = LocalConfiguration.current
-    val landscape = cfg.orientation == Configuration.ORIENTATION_LANDSCAPE
-    val compact = cfg.smallestScreenWidthDp < 600
-    when (proArrangement(compact, landscape)) {
-        ProArrangement.PHONE_PORTRAIT ->
-            Column(Modifier.fillMaxSize()) {
-                Spacer(Modifier.weight(0.75f))
-                ProPanel(
-                    s = s,
-                    showShutter = true,
-                    modifier = Modifier.fillMaxWidth().weight(1.25f),
-                )
-            }
-        ProArrangement.PHONE_LANDSCAPE ->
-            Row(Modifier.fillMaxSize()) {
-                Spacer(Modifier.fillMaxHeight().weight(1.1f))
-                ProPanel(
-                    s = s,
-                    showShutter = true,
-                    modifier = Modifier.fillMaxHeight().weight(0.9f),
-                )
-            }
-        // Tablet portrait: the shutter sits just below the preview's right edge.
-        ProArrangement.TABLET_PORTRAIT ->
-            Row(Modifier.fillMaxSize()) {
-                Column(Modifier.fillMaxHeight().weight(1.3f)) {
-                    Spacer(Modifier.weight(1f))
-                    Row(
-                        Modifier.fillMaxWidth()
-                            .background(Color.Black.copy(alpha = 0.72f))
-                            .windowInsetsPadding(WindowInsets.safeDrawing)
-                            .padding(horizontal = 20.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        ShutterButton(
-                            isVideo = s.isRecordMode(),
-                            isRecording = s.isRecording,
-                            isCapturing = s.isCapturing,
-                            enabled = !s.bgRunning,
-                            size = 78.dp,
-                            onClick = { s.onShutter() },
-                        )
-                    }
-                }
-                ProPanel(
-                    s = s,
-                    showShutter = false,
-                    modifier = Modifier.fillMaxHeight().weight(1f),
-                )
-            }
-        ProArrangement.TABLET_LANDSCAPE ->
-            Row(Modifier.fillMaxSize()) {
-                Spacer(Modifier.fillMaxHeight().weight(1.25f))
-                ProPanel(
-                    s = s,
-                    showShutter = true,
-                    modifier = Modifier.fillMaxHeight().weight(1f),
-                )
-            }
     }
 }

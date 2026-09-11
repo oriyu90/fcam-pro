@@ -340,6 +340,19 @@ class CameraViewModelTest {
     }
 
     @Test
+    fun tapInFocusBoxUnlocksOnlyInside() {
+        // Box centered at (500, 500), half 68, view 1000x1000.
+        assertEquals(true, ZoomRatios.isTapInFocusBox(500f, 500f, 500f, 500f, 68f, 1000f, 1000f))
+        assertEquals(true, ZoomRatios.isTapInFocusBox(560f, 440f, 500f, 500f, 68f, 1000f, 1000f))
+        assertEquals(false, ZoomRatios.isTapInFocusBox(100f, 100f, 500f, 500f, 68f, 1000f, 1000f))
+        // Degenerate geometry never matches.
+        assertEquals(false, ZoomRatios.isTapInFocusBox(500f, 500f, 500f, 500f, 0f, 1000f, 1000f))
+        assertEquals(false, ZoomRatios.isTapInFocusBox(500f, 500f, 500f, 500f, 68f, 0f, 1000f))
+        // Clamped box near the edge still hit-tests.
+        assertEquals(true, ZoomRatios.isTapInFocusBox(30f, 30f, 10f, 10f, 68f, 1000f, 1000f))
+    }
+
+    @Test
     fun dedupeLensesDropsSameFocalTwins() {
         fun lens(id: String, type: com.oriyu90.fcampro.ui.CameraLensType, focal: Float) =
             com.oriyu90.fcampro.ui.CameraLensInfo(

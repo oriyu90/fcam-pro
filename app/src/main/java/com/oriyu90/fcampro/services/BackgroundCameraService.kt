@@ -63,6 +63,11 @@ class BackgroundCameraService : LifecycleService() {
     private var cameraId: String? = null
     private var physicalCameraId: String? = null
     private var targetRotation: Int = android.view.Surface.ROTATION_0
+    // Pause bookkeeping: the ticker excludes paused spans.
+    private var paused = false
+    private var hasStarted = false
+    private var pauseStartedAt = 0L
+    private var pausedAccumMs = 0L
     // Guards against two rapid start() calls queuing two bind sequences (the second
     // would overwrite `recording` and leak the first Recording).
     private var startPending = false
@@ -85,6 +90,10 @@ class BackgroundCameraService : LifecycleService() {
         super.onStartCommand(intent, flags, startId)
         if (intent?.action == ACTION_STOP) {
             stopEverything()
+            return START_NOT_STICKY
+        }
+        if (intent?.action == ACTION_TOGGLE_PAUSE) {
+            togglePause()
             return START_NOT_STICKY
         }
 
@@ -120,6 +129,38 @@ class BackgroundCameraService : LifecycleService() {
             )
         }
         return START_NOT_STICKY
+    }
+
+    /** Pause <-> resume toggle from the notification button. */
+    private fun togglePause() {
+        val rec = recording
+        if (rec == null || stopping || !hasStarted) return
+        if (paused) {
+            if (runCatching { rec.resume() }.isSuccess) {
+                pausedAccumMs += SystemClock.elapsedRealtime() - pauseStartedAt
+                paused = false
+                refreshNotification()
+            }
+        } else {
+            if (runCatching { rec.pause() }.isSuccess) {
+                pauseStartedAt = SystemClock.elapsedRealtime()
+                paused = true
+                refreshNotification()
+            }
+        }
+    }
+
+    private fun refreshNotification() {
+        updateNotification(currentStatusText())
+    }
+
+    private fun currentStatusText(): String {
+        val elapsedMs =
+            SystemClock.elapsedRealtime() - startedAtElapsed - pausedAccumMs -
+                if (paused) SystemClock.elapsedRealtime() - pauseStartedAt else 0L
+        val text = formatElapsed(elapsedMs)
+        return if (paused) getString(R.string.notif_paused, text)
+        else getString(R.string.notif_recording_elapsed, text)
     }
 
     private fun startRecording() {
@@ -236,6 +277,9 @@ class BackgroundCameraService : LifecycleService() {
                     when (event) {
                         is VideoRecordEvent.Start -> {
                             startedAtElapsed = SystemClock.elapsedRealtime()
+                            hasStarted = true
+                            paused = false
+                            pausedAccumMs = 0L
                             startTicker()
                             updateNotification(getString(R.string.notif_recording_text))
                         }
@@ -263,12 +307,7 @@ class BackgroundCameraService : LifecycleService() {
         tickerJob =
             lifecycleScope.launch {
                 while (isActive && !stopping) {
-                    updateNotification(
-                        getString(
-                            R.string.notif_recording_elapsed,
-                            formatElapsed(SystemClock.elapsedRealtime() - startedAtElapsed),
-                        )
-                    )
+                    refreshNotification()
                     delay(1000L)
                 }
             }
@@ -291,6 +330,9 @@ class BackgroundCameraService : LifecycleService() {
         if (stopping) return
         stopping = true
         startPending = false
+        paused = false
+        hasStarted = false
+        pausedAccumMs = 0L
         main.removeCallbacksAndMessages(null)
         _running.value = false
         tickerJob?.cancel()
@@ -367,7 +409,19 @@ class BackgroundCameraService : LifecycleService() {
                 )
             )
             .addAction(
-                android.R.drawable.ic_media_pause,
+                if (paused) android.R.drawable.ic_media_play
+                else android.R.drawable.ic_media_pause,
+                if (paused) getString(R.string.notif_resume)
+                else getString(R.string.notif_pause),
+                PendingIntent.getService(
+                    this,
+                    2,
+                    Intent(this, BackgroundCameraService::class.java).setAction(ACTION_TOGGLE_PAUSE),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                ),
+            )
+            .addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
                 getString(R.string.notif_stop),
                 PendingIntent.getService(
                     this,
@@ -410,6 +464,7 @@ class BackgroundCameraService : LifecycleService() {
         private const val CHANNEL_ID = "fcam_background_recording"
         private const val NOTIF_ID = 4211
         const val ACTION_STOP = "com.oriyu90.fcampro.action.STOP_BG_RECORDING"
+        const val ACTION_TOGGLE_PAUSE = "com.oriyu90.fcampro.action.TOGGLE_PAUSE_BG_RECORDING"
         const val EXTRA_LENS_FRONT = "com.oriyu90.fcampro.extra.LENS_FRONT"
         const val EXTRA_CAMERA_ID = "com.oriyu90.fcampro.extra.CAMERA_ID"
         const val EXTRA_PHYSICAL_CAMERA_ID = "com.oriyu90.fcampro.extra.PHYSICAL_CAMERA_ID"
