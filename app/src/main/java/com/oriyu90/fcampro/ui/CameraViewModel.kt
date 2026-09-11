@@ -289,6 +289,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         // Drop logical/physical same-focal twins (e.g. Galaxy main twice).
         val deduped = dedupeLenses(lenses)
+        for (lens in deduped) {
+            Log.i(
+                TAG,
+                "lens id=${lens.id} logical=${lens.logicalCameraId} " +
+                    "physical=${lens.physicalCameraId} type=${lens.type} " +
+                    "focal=${lens.focalLength} minFocus=${lens.capabilities.minFocusDistance} " +
+                    "front=${lens.isFront} manual=${lens.capabilities.supportsManualSensor} " +
+                    "raw=${lens.capabilities.rawCapability?.supported} " +
+                    "hs=${lens.capabilities.highSpeedVideo?.maxFps}",
+            )
+        }
         val sorted =
             deduped.sortedWith(
                 compareBy(
@@ -556,7 +567,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val type =
                 when {
                     isFront -> CameraLensType.FRONT
-                    minFocus >= 10f -> CameraLensType.MACRO
+                    // Dedicated macro lenses report very close focus (20+ diopters).
+                    // Main cameras with close focus (e.g. Galaxy S24 main = 10.0)
+                    // must stay WIDE, so the bar is 15, not 10.
+                    minFocus >= 15f -> CameraLensType.MACRO
                     focalLength < 3.5f -> CameraLensType.ULTRAWIDE
                     focalLength > 6.5f -> CameraLensType.TELEPHOTO
                     else -> CameraLensType.WIDE

@@ -10,7 +10,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -140,7 +139,6 @@ fun CameraOverlay(
     onToggleBackground: () -> Unit,
     onOpenSettings: () -> Unit,
     onCancelExternal: () -> Unit,
-    previewContent: (@Composable BoxScope.() -> Unit)? = null,
 ) {
     val cfg = LocalConfiguration.current
     val landscape = cfg.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -198,14 +196,13 @@ fun CameraOverlay(
             onOpenSettings = onOpenSettings,
         )
 
-    // Pro (manual) mode uses the dedicated Sony-style layout with a smaller
-    // preview; the preview content is hosted by the caller (CameraScreen).
+    // Pro (manual) mode uses the dedicated Sony-style overlay: status strip
+    // over the shared full-bleed preview plus a concentrated panel.
     if (external == null &&
         settings.isManualMode &&
-        isStillMode(settings.cameraMode) &&
-        previewContent != null
+        isStillMode(settings.cameraMode)
     ) {
-        ProCameraUi(shared, previewContent)
+        ProCameraUi(shared)
         return
     }
 
@@ -1704,6 +1701,12 @@ private fun ProPanel(
                 .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
         ProQuickRow(s)
+        LensZoomPills(
+            lenses = s.availableLenses.filter { it.isFront == s.settings.isFrontCamera },
+            current = s.settings.currentLens,
+            enabled = !s.isRecording && !s.bgRunning,
+            onSelect = { s.viewModel.setLens(it) },
+        )
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             ManualPanel(s.viewModel, s.settings, s.profiles)
         }
@@ -1723,28 +1726,46 @@ private fun ProPanel(
     }
 }
 
-/** Sony-style pro shell: shrunken preview + concentrated panel. */
+/** Sony-style pro shell: status strip over the preview, concentrated panel.
+ *
+ * The preview surface itself is NOT hosted here: a single AndroidView node
+ * lives in CameraScreen (sharing one View across two AndroidView nodes
+ * crashes with "child already has a parent" on layout switches), so this
+ * shell only overlays the status strip and the bottom/side panel while the
+ * full-bleed preview shows through the transparent areas.
+ */
 @Composable
-private fun ProCameraUi(
-    s: SharedActions,
-    previewContent: @Composable BoxScope.() -> Unit,
-) {
+private fun ProCameraUi(s: SharedActions) {
     val cfg = LocalConfiguration.current
     val landscape = cfg.orientation == Configuration.ORIENTATION_LANDSCAPE
     val compact = cfg.smallestScreenWidthDp < 600
     when (proArrangement(compact, landscape)) {
         ProArrangement.PHONE_PORTRAIT ->
-            Column(Modifier.fillMaxSize().background(Color.Black)) {
-                Box(Modifier.fillMaxWidth().weight(1f)) { previewContent() }
+            Column(Modifier.fillMaxSize()) {
+                ProStatusStrip(
+                    batteryPct = s.batteryPct,
+                    mode = s.settings.cameraMode,
+                    lens = s.settings.currentLens,
+                    hasMedia = s.hasMedia,
+                )
+                Spacer(Modifier.weight(1f))
                 ProPanel(
                     s = s,
                     showShutter = true,
-                    modifier = Modifier.fillMaxWidth().weight(1.15f),
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         ProArrangement.PHONE_LANDSCAPE ->
-            Row(Modifier.fillMaxSize().background(Color.Black)) {
-                Box(Modifier.fillMaxHeight().weight(1.05f)) { previewContent() }
+            Row(Modifier.fillMaxSize()) {
+                Column(Modifier.fillMaxHeight().weight(1.05f)) {
+                    ProStatusStrip(
+                        batteryPct = s.batteryPct,
+                        mode = s.settings.cameraMode,
+                        lens = s.settings.currentLens,
+                        hasMedia = s.hasMedia,
+                    )
+                    Spacer(Modifier.weight(1f))
+                }
                 ProPanel(
                     s = s,
                     showShutter = true,
@@ -1753,12 +1774,18 @@ private fun ProCameraUi(
             }
         // Tablet portrait: the shutter sits just below the preview's right edge.
         ProArrangement.TABLET_PORTRAIT ->
-            Row(Modifier.fillMaxSize().background(Color.Black)) {
+            Row(Modifier.fillMaxSize()) {
                 Column(Modifier.fillMaxHeight().weight(1.3f)) {
-                    Box(Modifier.fillMaxWidth().weight(1f)) { previewContent() }
+                    ProStatusStrip(
+                        batteryPct = s.batteryPct,
+                        mode = s.settings.cameraMode,
+                        lens = s.settings.currentLens,
+                        hasMedia = s.hasMedia,
+                    )
+                    Spacer(Modifier.weight(1f))
                     Row(
                         Modifier.fillMaxWidth()
-                            .background(Color.Black)
+                            .background(Color.Black.copy(alpha = 0.72f))
                             .windowInsetsPadding(WindowInsets.safeDrawing)
                             .padding(horizontal = 20.dp, vertical = 10.dp),
                         horizontalArrangement = Arrangement.End,
@@ -1781,8 +1808,16 @@ private fun ProCameraUi(
                 )
             }
         ProArrangement.TABLET_LANDSCAPE ->
-            Row(Modifier.fillMaxSize().background(Color.Black)) {
-                Box(Modifier.fillMaxHeight().weight(1.25f)) { previewContent() }
+            Row(Modifier.fillMaxSize()) {
+                Column(Modifier.fillMaxHeight().weight(1.25f)) {
+                    ProStatusStrip(
+                        batteryPct = s.batteryPct,
+                        mode = s.settings.cameraMode,
+                        lens = s.settings.currentLens,
+                        hasMedia = s.hasMedia,
+                    )
+                    Spacer(Modifier.weight(1f))
+                }
                 ProPanel(
                     s = s,
                     showShutter = true,

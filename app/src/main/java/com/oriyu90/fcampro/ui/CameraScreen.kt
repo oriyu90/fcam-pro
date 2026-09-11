@@ -1224,8 +1224,23 @@ fun CameraScreen(
     ) { padding ->
         @Composable
         fun PreviewSurface(modifier: Modifier) {
+            // Single AndroidView node for the shared PreviewView: hosting one
+            // View in two AndroidView nodes crashes ("child already has a
+            // parent"), so all layouts reuse this call site. The pro overlay
+            // covers the lower/right part; FILL_START hugs the preview to the
+            // visible top/left instead of center-cropping behind the panel.
+            val proMode =
+                external == null &&
+                    settings.isManualMode &&
+                    (settings.cameraMode == CameraMode.PHOTO ||
+                        settings.cameraMode == CameraMode.VIDEO)
             AndroidView(
                 factory = { previewView },
+                update = {
+                    it.scaleType =
+                        if (proMode) PreviewView.ScaleType.FILL_START
+                        else PreviewView.ScaleType.FILL_CENTER
+                },
                 modifier =
                     modifier
                         .onSizeChanged { previewSize = it }
@@ -1418,16 +1433,6 @@ fun CameraScreen(
                 },
                 onOpenSettings = onOpenSettings,
                 onCancelExternal = { onExternalResult(false, null) },
-                previewContent = {
-                    PreviewSurface(Modifier.fillMaxSize())
-                    PreviewDecor()
-                    ProStatusStrip(
-                        batteryPct = batteryPct,
-                        mode = settings.cameraMode,
-                        lens = settings.currentLens,
-                        hasMedia = lastMedia != null,
-                    )
-                },
             )
         }
     }
