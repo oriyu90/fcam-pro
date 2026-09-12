@@ -1,13 +1,12 @@
 package com.oriyu90.fcampro.ui
 
+import android.hardware.camera2.CameraMetadata
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -15,19 +14,20 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ElevatedFilterChip
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -38,18 +38,27 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.oriyu90.fcampro.R
 import com.oriyu90.fcampro.data.CameraProfile
+import java.util.Locale
 import kotlin.math.roundToInt
 
-/** Pro settings item selected via the icon row/strip. */
+/** Pro settings item selected from the quick-control deck. */
 enum class ProItem { ISO, SHUTTER, FOCUS, WB, EV, FORMAT, MIC, PROFILES }
+
+private val ProAccent = Color(0xFFFF9F0A)
+private val ProSurface = Color(0xFF171717)
+private val ProSelectedSurface = Color(0xFF2A2117)
+private val ProBoundary = Color(0xFF626262)
 
 internal fun modeTabRes(mode: CameraMode): Int =
     when (mode) {
@@ -81,10 +90,9 @@ private fun ProItem.labelRes(): Int =
         ProItem.EV -> R.string.label_ev
         ProItem.FORMAT -> R.string.label_save_format
         ProItem.MIC -> R.string.label_mic
-        ProItem.PROFILES -> R.string.save_profile
+        ProItem.PROFILES -> R.string.profiles_title
     }
 
-/** Dots under icons with non-default values. */
 private fun ProItem.isModified(s: SharedActions): Boolean =
     when (this) {
         ProItem.ISO, ProItem.SHUTTER -> s.settings.iso != null
@@ -96,34 +104,44 @@ private fun ProItem.isModified(s: SharedActions): Boolean =
         ProItem.PROFILES -> false
     }
 
-private fun proItemsFor(caps: LensCapabilities?): List<ProItem> =
-    ProItem.entries.filter { item ->
-        item != ProItem.FORMAT || caps?.rawCapability?.supported == true
+private fun proItemsFor(s: SharedActions): List<ProItem> =
+    listOf(
+        ProItem.ISO,
+        ProItem.SHUTTER,
+        ProItem.FOCUS,
+        ProItem.WB,
+        ProItem.EV,
+        ProItem.PROFILES,
+        ProItem.FORMAT,
+        ProItem.MIC,
+    ).filter { item ->
+        (item != ProItem.FORMAT || s.settings.currentLens?.capabilities?.rawCapability?.supported == true) &&
+            (item != ProItem.MIC || s.settings.cameraMode == CameraMode.VIDEO)
     }
 
-/** Toolbar pinned to the top (portrait) / panel top (landscape). */
+/** Toolbar pinned above all Android preview content. */
 @Composable
 internal fun ProToolbarBlock(s: SharedActions, modifier: Modifier = Modifier) {
-    ControlIcons(s = s, columns = 1, modifier = modifier)
+    Surface(color = Color.Black, modifier = modifier.zIndex(4f)) {
+        ControlIcons(s = s, columns = 1, modifier = Modifier.fillMaxWidth())
+    }
 }
 
-/** Plain status texts at the preview's top corner (no popups). */
+/** Compact camera status overlay. */
 @Composable
 internal fun ProStatusTexts(s: SharedActions, modifier: Modifier = Modifier) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val freeText = remember(s.hasMedia) { formatStorageGb(freeStorageBytes(context)) }
     Row(
-        modifier = modifier.padding(8.dp),
+        modifier =
+            modifier
+                .background(Color.Black.copy(alpha = 0.58f), RoundedCornerShape(8.dp))
+                .padding(horizontal = 9.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         s.batteryPct?.let {
-            Text(
-                "$it%",
-                color = Color.White,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-            )
+            Text("$it%", color = Color.White, style = MaterialTheme.typography.labelSmall)
         }
         Text(
             stringResource(modeTabRes(s.settings.cameraMode)),
@@ -135,8 +153,8 @@ internal fun ProStatusTexts(s: SharedActions, modifier: Modifier = Modifier) {
         Text(freeText, color = Color.White, style = MaterialTheme.typography.labelSmall, maxLines = 1)
         s.settings.currentLens?.let {
             Text(
-                "%.0fmm".format(java.util.Locale.US, it.focalLength),
-                color = Color.White.copy(alpha = 0.8f),
+                "%.0fmm".format(Locale.US, it.focalLength),
+                color = Color.White.copy(alpha = 0.82f),
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 1,
             )
@@ -147,64 +165,64 @@ internal fun ProStatusTexts(s: SharedActions, modifier: Modifier = Modifier) {
 private fun freeStorageBytes(context: android.content.Context): Long =
     runCatching { android.os.StatFs(context.filesDir.path).availableBytes }.getOrDefault(-1L)
 
-/** Small current-settings summary directly under the preview. */
+/** Four fixed exposure readouts directly below the viewfinder. */
 @Composable
 internal fun ProSummaryLine(s: SharedActions, modifier: Modifier = Modifier) {
     val caps = s.settings.currentLens?.capabilities
     val evStep = caps?.exposureCompStep?.takeIf { it > 0f } ?: (1f / 3f)
-    val ss =
-        s.settings.shutterSpeedNs?.let { "1/${(1_000_000_000L / it).coerceAtLeast(1)}" }
-            ?: stringResource(R.string.value_auto)
-    val f = caps?.apertures?.firstOrNull()?.let { "F%.1f".format(java.util.Locale.US, it) } ?: "--"
-    val ev = ExposureComp.evText(s.settings.exposureCompensation, evStep)
-    val iso = s.settings.iso?.toString() ?: stringResource(R.string.value_auto)
-    Text(
-        text = "SS $ss · $f · EV $ev · ISO $iso",
-        color = Color.White.copy(alpha = 0.85f),
-        style = MaterialTheme.typography.labelSmall,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = modifier.padding(vertical = 4.dp),
-    )
+    val values =
+        listOf(
+            "SS" to (s.settings.shutterSpeedNs?.let(ProControlPresets::shutterText) ?: stringResource(R.string.value_auto)),
+            "F" to (caps?.apertures?.firstOrNull()?.let { "%.1f".format(Locale.US, it) } ?: "--"),
+            "EV" to ExposureComp.evText(s.settings.exposureCompensation, evStep).removeSuffix(" EV"),
+            "ISO" to (s.settings.iso?.toString() ?: stringResource(R.string.value_auto)),
+        )
+    Row(
+        modifier = modifier.fillMaxWidth().background(Color.Black).padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+    ) {
+        values.forEach { (label, value) ->
+            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(label, color = Color.White.copy(alpha = 0.55f), style = MaterialTheme.typography.labelSmall)
+                Text(
+                    value,
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
 }
 
-/** Vertical plain-text lens switcher on the preview's right side. */
+/** Vertical lens switcher on the viewfinder's right edge. */
 @Composable
 internal fun ProLensTexts(s: SharedActions, modifier: Modifier = Modifier) {
     val lenses = s.availableLenses.filter { it.isFront == s.settings.isFrontCamera }
     if (lenses.size <= 1) return
-    val base =
-        lenses.firstOrNull { it.type == CameraLensType.WIDE }?.focalLength
-            ?: lenses.minOf { it.focalLength }
+    val base = lenses.firstOrNull { it.type == CameraLensType.WIDE }?.focalLength ?: lenses.minOf { it.focalLength }
     val enabled = !s.isRecording && !s.bgRunning
     Column(
-        modifier = modifier.padding(8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
+        modifier = modifier.background(Color.Black.copy(alpha = 0.48f), RoundedCornerShape(10.dp)).padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         lenses.forEach { lens ->
             val selected = s.settings.currentLens?.id == lens.id
             val ratio = lens.focalLength / base.coerceAtLeast(0.1f)
             Text(
-                text = "×%.1f".format(java.util.Locale.US, ratio),
-                color =
-                    when {
-                        selected -> Color.White
-                        !enabled -> Color.White.copy(alpha = 0.3f)
-                        else -> Color.White.copy(alpha = 0.6f)
-                    },
+                text = "×%.1f".format(Locale.US, ratio),
+                color = if (selected) ProAccent else Color.White.copy(alpha = if (enabled) 0.72f else 0.3f),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                maxLines = 1,
-                modifier =
-                    Modifier.clickable(enabled = enabled) { s.viewModel.setLens(lens) }
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                modifier = Modifier.clickable(enabled = enabled) { s.viewModel.setLens(lens) }.padding(horizontal = 14.dp, vertical = 10.dp),
             )
         }
     }
 }
 
-/** Settings icon row (portrait) or vertical strip (landscape gap). */
+/** Portrait strip / landscape two-column deck; every item includes its live value. */
 @Composable
 internal fun ProIconSelector(
     s: SharedActions,
@@ -213,315 +231,231 @@ internal fun ProIconSelector(
     vertical: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    val items = proItemsFor(s.settings.currentLens?.capabilities)
+    val entries = proItemsFor(s)
     if (vertical) {
-        Column(
-            modifier = modifier,
-            verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            items.forEach { item -> ProIconButton(s, item, active == item, { onSelect(if (active == item) null else item) }) }
-        }
-    } else {
-        // Two rows of four: all eight icons visible without scrolling.
-        Column(
-            modifier = modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            items.chunked(4).forEach { row ->
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    row.forEach { item ->
-                        ProIconButton(s, item, active == item, { onSelect(if (active == item) null else item) })
+        Column(modifier = modifier.fillMaxWidth().padding(horizontal = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            entries.chunked(2).forEach { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (row.size == 1) {
+                        val item = row.first()
+                        ProValueButton(s, item, active == item, { onSelect(if (active == item) null else item) }, Modifier.fillMaxWidth())
+                    } else {
+                        row.forEach { item ->
+                            ProValueButton(s, item, active == item, { onSelect(if (active == item) null else item) }, Modifier.weight(1f))
+                        }
                     }
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun ProIconButton(
-    s: SharedActions,
-    item: ProItem,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val cd = stringResource(item.labelRes())
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            modifier =
-                Modifier.size(52.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (selected) MaterialTheme.colorScheme.primary
-                        else Color.White.copy(alpha = 0.14f)
-                    )
-                    .clickable(onClick = onClick),
-            contentAlignment = Alignment.Center,
+    } else {
+        LazyRow(
+            modifier = modifier.fillMaxWidth().background(Color.Black).padding(vertical = 6.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
-            Text(
-                item.code(),
-                color =
-                    if (selected) MaterialTheme.colorScheme.onPrimary
-                    else Color.White,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-            )
+            items(entries, key = { it.name }) { item ->
+                ProValueButton(s, item, active == item, { onSelect(if (active == item) null else item) }, Modifier.width(74.dp))
+            }
         }
-        Spacer(Modifier.height(3.dp))
-        Box(
-            modifier =
-                Modifier.size(5.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (item.isModified(s)) MaterialTheme.colorScheme.primary
-                        else Color.Transparent
-                    )
-        )
     }
 }
 
-/** The selected item's control UI (or a hint when nothing is selected). */
 @Composable
-internal fun ProControlArea(
-    s: SharedActions,
-    active: ProItem?,
-    modifier: Modifier = Modifier,
-) {
+private fun ProValueButton(s: SharedActions, item: ProItem, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val label = stringResource(item.labelRes())
+    val value = proItemValue(item, s)
+    val modified = item.isModified(s)
+    Column(
+        modifier =
+            modifier.height(58.dp)
+                .semantics { contentDescription = "$label, $value" }
+                .background(if (selected) ProSelectedSurface else ProSurface, RoundedCornerShape(8.dp))
+                .border(if (selected) 2.dp else 1.dp, if (selected) ProAccent else ProBoundary, RoundedCornerShape(8.dp))
+                .clickable(onClick = onClick)
+                .padding(horizontal = 6.dp, vertical = 5.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(item.code(), color = if (selected || modified) ProAccent else Color.White.copy(alpha = 0.72f), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+        Text(value, color = Color.White, style = MaterialTheme.typography.labelMedium, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+    }
+}
+
+@Composable
+private fun proItemValue(item: ProItem, s: SharedActions): String {
     val caps = s.settings.currentLens?.capabilities
-    Column(modifier = modifier.fillMaxWidth()) {
+    return when (item) {
+        ProItem.ISO -> s.settings.iso?.toString() ?: stringResource(R.string.value_auto)
+        ProItem.SHUTTER -> s.settings.shutterSpeedNs?.let(ProControlPresets::shutterText) ?: stringResource(R.string.value_auto)
+        ProItem.FOCUS -> s.settings.focusDistance?.let { "MF %.1f".format(Locale.US, it) } ?: stringResource(R.string.focus_continuous)
+        ProItem.WB -> wbLabel(s.settings.whiteBalanceMode)
+        ProItem.EV -> ExposureComp.evText(s.settings.exposureCompensation, caps?.exposureCompStep?.takeIf { it > 0f } ?: 1f / 3f).removeSuffix(" EV")
+        ProItem.FORMAT -> when (s.settings.saveFormat) { SaveFormat.JPEG -> "JPEG"; SaveFormat.JPEG_RAW -> "J+R"; SaveFormat.RAW -> "RAW" }
+        ProItem.MIC -> stringResource(if (s.settings.audioChannels == 2) R.string.mic_stereo else R.string.mic_mono)
+        ProItem.PROFILES -> s.profiles.size.toString()
+    }
+}
+
+/** Selected setting options. */
+@Composable
+internal fun ProControlArea(s: SharedActions, active: ProItem?, modifier: Modifier = Modifier) {
+    val caps = s.settings.currentLens?.capabilities
+    Column(modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+        if (active == null) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.pro_hint_select), color = Color.White.copy(alpha = 0.68f), style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = { s.viewModel.resetManualSettings() }) { Text(stringResource(R.string.manual_all_auto), color = ProAccent) }
+            }
+            return@Column
+        }
+
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(active.labelRes()), color = Color.White, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Text(proItemValue(active, s), color = ProAccent, style = MaterialTheme.typography.titleSmall)
+        }
+        HorizontalDivider(Modifier.padding(vertical = 6.dp), color = ProBoundary)
+
         when (active) {
-            null ->
-                Text(
-                    stringResource(R.string.pro_hint_select),
-                    color = Color.White.copy(alpha = 0.55f),
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.padding(vertical = 12.dp),
-                )
             ProItem.ISO -> {
-                val isoRange = caps?.isoRange ?: 50..3200
-                LabeledSlider(
-                    label = stringResource(R.string.label_iso),
-                    valueText = s.settings.iso?.toString() ?: stringResource(R.string.value_auto),
-                    value = s.settings.iso?.toFloat() ?: isoRange.first.toFloat(),
-                    range = isoRange.first.toFloat()..isoRange.last.toFloat(),
-                    isAuto = s.settings.iso == null,
-                    onAuto = { s.viewModel.clearExposureManual() },
-                    onChange = {
-                        s.viewModel.updateManualSettings(
-                            it.toInt(),
-                            s.settings.shutterSpeedNs,
-                            s.settings.focusDistance,
-                            s.settings.whiteBalanceMode,
-                        )
-                    },
+                val range = caps?.isoRange ?: 50..3200
+                ProChoices(
+                    choices = listOf(null) + ProControlPresets.isoValues(range),
+                    selected = s.settings.iso,
+                    label = { it?.toString() ?: stringResource(R.string.value_auto) },
+                    onSelect = { value -> if (value == null) s.viewModel.clearExposureManual() else s.viewModel.updateManualSettings(value, s.settings.shutterSpeedNs, s.settings.focusDistance, s.settings.whiteBalanceMode) },
                 )
             }
             ProItem.SHUTTER -> {
-                val expRange = caps?.exposureRangeNs ?: 125_000L..1_000_000_000L
-                val text =
-                    s.settings.shutterSpeedNs?.let { "1/${(1_000_000_000L / it).coerceAtLeast(1)}s" }
-                        ?: stringResource(R.string.value_auto)
-                LabeledSlider(
-                    label = stringResource(R.string.label_shutter),
-                    valueText = text,
-                    value = s.settings.shutterSpeedNs?.toFloat() ?: expRange.first.toFloat(),
-                    range = expRange.first.toFloat()..expRange.last.toFloat(),
-                    isAuto = s.settings.shutterSpeedNs == null,
-                    onAuto = { s.viewModel.clearExposureManual() },
-                    onChange = {
-                        s.viewModel.updateManualSettings(
-                            s.settings.iso,
-                            it.toLong(),
-                            s.settings.focusDistance,
-                            s.settings.whiteBalanceMode,
-                        )
-                    },
+                val range = caps?.exposureRangeNs ?: 125_000L..1_000_000_000L
+                ProChoices(
+                    choices = listOf(null) + ProControlPresets.shutterValues(range),
+                    selected = s.settings.shutterSpeedNs,
+                    label = { it?.let(ProControlPresets::shutterText) ?: stringResource(R.string.value_auto) },
+                    onSelect = { value -> if (value == null) s.viewModel.clearExposureManual() else s.viewModel.updateManualSettings(s.settings.iso, value, s.settings.focusDistance, s.settings.whiteBalanceMode) },
                 )
             }
             ProItem.FOCUS -> {
-                val focusMax = caps?.minFocusDistance?.takeIf { it > 0f } ?: 10f
-                LabeledSlider(
-                    label = stringResource(R.string.label_focus),
-                    valueText =
-                        s.settings.focusDistance?.let { "%.1f".format(it) }
-                            ?: stringResource(R.string.value_auto),
-                    value = s.settings.focusDistance ?: 0f,
-                    range = 0f..focusMax,
-                    isAuto = s.settings.focusDistance == null,
-                    onAuto = {
-                        s.viewModel.updateManualSettings(
-                            s.settings.iso,
-                            s.settings.shutterSpeedNs,
-                            null,
-                            s.settings.whiteBalanceMode,
-                        )
-                    },
-                    onChange = {
-                        s.viewModel.updateManualSettings(
-                            s.settings.iso,
-                            s.settings.shutterSpeedNs,
-                            it,
-                            s.settings.whiteBalanceMode,
-                        )
-                    },
-                )
+                val focusMax = caps?.minFocusDistance?.takeIf { it > 0f }
+                if (focusMax == null) {
+                    Text(stringResource(R.string.focus_fixed), color = Color.White.copy(alpha = 0.65f))
+                } else {
+                    FilterChip(
+                        selected = s.settings.focusDistance == null,
+                        onClick = { s.viewModel.updateManualSettings(s.settings.iso, s.settings.shutterSpeedNs, null, s.settings.whiteBalanceMode) },
+                        label = { Text(stringResource(R.string.focus_continuous)) },
+                        leadingIcon = if (s.settings.focusDistance == null) ({ Icon(Icons.Default.Check, null, Modifier.size(16.dp)) }) else null,
+                        colors = proFilterChipColors(),
+                    )
+                    LabeledSlider(
+                        label = stringResource(R.string.focus_near_far),
+                        valueText = s.settings.focusDistance?.let { "%.1f".format(Locale.US, it) } ?: stringResource(R.string.value_auto),
+                        value = s.settings.focusDistance ?: 0f,
+                        range = 0f..focusMax,
+                        onChange = { s.viewModel.updateManualSettings(s.settings.iso, s.settings.shutterSpeedNs, it, s.settings.whiteBalanceMode) },
+                    )
+                }
             }
             ProItem.WB -> {
-                if (caps != null && caps.awbModes.size > 1) {
-                    LabeledSlider(
-                        label = stringResource(R.string.label_wb),
-                        valueText =
-                            s.settings.whiteBalanceMode?.toString()
-                                ?: stringResource(R.string.value_auto),
-                        value = s.settings.whiteBalanceMode?.toFloat() ?: 1f,
-                        range = 1f..8f,
-                        steps = 6,
-                        isAuto = s.settings.whiteBalanceMode == null,
-                        onAuto = {
-                            s.viewModel.updateManualSettings(
-                                s.settings.iso,
-                                s.settings.shutterSpeedNs,
-                                s.settings.focusDistance,
-                                null,
-                            )
-                        },
-                        onChange = {
-                            s.viewModel.updateManualSettings(
-                                s.settings.iso,
-                                s.settings.shutterSpeedNs,
-                                s.settings.focusDistance,
-                                it.toInt(),
-                            )
-                        },
-                    )
-                } else {
-                    Text(
-                        stringResource(R.string.manual_unsupported),
-                        color = Color.White.copy(alpha = 0.6f),
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.padding(vertical = 12.dp),
-                    )
-                }
-            }
-            ProItem.EV -> {
-                if (s.settings.iso == null && s.settings.shutterSpeedNs == null &&
-                    caps?.exposureCompRange != null
-                ) {
-                    val evRange = caps.exposureCompRange
-                    val evStep = caps.exposureCompStep.takeIf { it > 0f } ?: (1f / 3f)
-                    LabeledSlider(
-                        label = stringResource(R.string.label_ev),
-                        valueText = ExposureComp.evText(s.settings.exposureCompensation, evStep),
-                        value = s.settings.exposureCompensation.toFloat(),
-                        range = evRange.first.toFloat()..evRange.last.toFloat(),
-                        steps = (evRange.last - evRange.first - 1).coerceAtLeast(0),
-                        onChange = { s.viewModel.updateExposureCompensation(it.roundToInt()) },
-                    )
-                } else {
-                    Text(
-                        stringResource(R.string.pro_ev_disabled),
-                        color = Color.White.copy(alpha = 0.6f),
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.padding(vertical = 12.dp),
-                    )
-                }
-            }
-            ProItem.FORMAT -> {
-                SaveFormatSelector(
-                    selected = s.settings.saveFormat,
-                    bitDepth = caps?.rawCapability?.bitDepth,
-                    onSelect = { s.viewModel.setSaveFormat(it) },
+                val modes = caps?.awbModes.orEmpty().distinct()
+                if (modes.isEmpty()) Text(stringResource(R.string.manual_unsupported), color = Color.White.copy(alpha = 0.65f))
+                else ProChoices(
+                    choices = listOf(null) + modes.filter { it != CameraMetadata.CONTROL_AWB_MODE_OFF },
+                    selected = s.settings.whiteBalanceMode,
+                    label = { wbLabel(it) },
+                    onSelect = { s.viewModel.updateManualSettings(s.settings.iso, s.settings.shutterSpeedNs, s.settings.focusDistance, it) },
                 )
             }
-            ProItem.MIC -> {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text =
-                            stringResource(R.string.label_mic) +
-                                ": " +
-                                stringResource(
-                                    if (s.settings.audioChannels == 2) R.string.mic_stereo
-                                    else R.string.mic_mono
-                                ),
-                        color = Color.White,
-                        modifier = Modifier.width(120.dp),
-                        style = MaterialTheme.typography.labelSmall,
+            ProItem.EV -> {
+                if (s.settings.iso == null && s.settings.shutterSpeedNs == null && caps?.exposureCompRange != null) {
+                    val step = caps.exposureCompStep.takeIf { it > 0f } ?: 1f / 3f
+                    ProChoices(
+                        choices = caps.exposureCompRange.toList(),
+                        selected = s.settings.exposureCompensation,
+                        label = { ExposureComp.evText(it, step).removeSuffix(" EV") },
+                        onSelect = s.viewModel::updateExposureCompensation,
                     )
-                    androidx.compose.material3.Switch(
-                        checked = s.settings.audioChannels == 2,
-                        onCheckedChange = { s.viewModel.cycleAudioChannels() },
-                    )
-                }
+                } else Text(stringResource(R.string.pro_ev_disabled), color = Color.White.copy(alpha = 0.65f))
             }
+            ProItem.FORMAT -> SaveFormatSelector(s.settings.saveFormat, caps?.rawCapability?.bitDepth, s.viewModel::setSaveFormat)
+            ProItem.MIC -> ProChoices(
+                choices = listOf(1, 2),
+                selected = s.settings.audioChannels,
+                label = { stringResource(if (it == 2) R.string.mic_stereo else R.string.mic_mono) },
+                onSelect = { if (it != s.settings.audioChannels) s.viewModel.cycleAudioChannels() },
+            )
             ProItem.PROFILES -> ProProfilesBlock(s)
         }
     }
 }
 
 @Composable
+private fun <T> ProChoices(choices: List<T>, selected: T, label: @Composable (T) -> String, onSelect: (T) -> Unit) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(choices) { value ->
+            val isSelected = value == selected
+            FilterChip(
+                selected = isSelected,
+                onClick = { onSelect(value) },
+                label = { Text(label(value), maxLines = 1) },
+                leadingIcon = if (isSelected) ({ Icon(Icons.Default.Check, null, Modifier.size(16.dp)) }) else null,
+                colors = proFilterChipColors(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun proFilterChipColors() =
+    FilterChipDefaults.filterChipColors(
+        selectedContainerColor = ProSelectedSurface,
+        selectedLabelColor = Color.White,
+        selectedLeadingIconColor = ProAccent,
+    )
+
+@Composable
+private fun wbLabel(mode: Int?): String =
+    stringResource(
+        when (mode) {
+            CameraMetadata.CONTROL_AWB_MODE_INCANDESCENT -> R.string.wb_incandescent
+            CameraMetadata.CONTROL_AWB_MODE_FLUORESCENT -> R.string.wb_fluorescent
+            CameraMetadata.CONTROL_AWB_MODE_WARM_FLUORESCENT -> R.string.wb_warm_fluorescent
+            CameraMetadata.CONTROL_AWB_MODE_DAYLIGHT -> R.string.wb_daylight
+            CameraMetadata.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT -> R.string.wb_cloudy
+            CameraMetadata.CONTROL_AWB_MODE_TWILIGHT -> R.string.wb_twilight
+            CameraMetadata.CONTROL_AWB_MODE_SHADE -> R.string.wb_shade
+            else -> R.string.value_auto
+        }
+    )
+
+@Composable
 private fun ProProfilesBlock(s: SharedActions) {
     var showSave by remember { mutableStateOf(false) }
     var editProfile by remember { mutableStateOf<CameraProfile?>(null) }
-    Column(Modifier.fillMaxWidth()) {
-        Button(
-            onClick = { showSave = true },
-            modifier = Modifier.align(Alignment.End),
+    var deleteProfile by remember { mutableStateOf<CameraProfile?>(null) }
+    var saved by remember { mutableStateOf(false) }
+
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Text(if (s.profiles.isEmpty()) stringResource(R.string.profiles_empty) else stringResource(R.string.profile_count, s.profiles.size), color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.bodySmall)
+        Button(onClick = { showSave = true; saved = false }) { Text(stringResource(R.string.save_profile)) }
+    }
+    if (saved) Text(stringResource(R.string.profile_saved), color = ProAccent, style = MaterialTheme.typography.labelMedium)
+    s.profiles.forEach { profile ->
+        val matches = profile.matches(s.settings)
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+                .background(if (matches) ProSelectedSurface else ProSurface, RoundedCornerShape(8.dp))
+                .border(1.dp, if (matches) ProAccent else ProBoundary, RoundedCornerShape(8.dp))
+                .clickable { s.viewModel.loadProfile(profile) }
+                .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(stringResource(R.string.save_profile))
-        }
-        if (s.profiles.isNotEmpty()) {
-            LazyRow(modifier = Modifier.padding(vertical = 8.dp)) {
-                items(s.profiles, key = { it.id }) { profile ->
-                    ElevatedFilterChip(
-                        selected = false,
-                        onClick = { s.viewModel.loadProfile(profile) },
-                        label = {
-                            Text(
-                                profile.name.ifBlank { stringResource(R.string.profile_unnamed) },
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
-                        modifier = Modifier.padding(end = 8.dp),
-                        leadingIcon = {
-                            IconButton(
-                                onClick = { editProfile = profile },
-                                modifier = Modifier.size(24.dp),
-                            ) {
-                                Icon(
-                                    Icons.Default.Edit,
-                                    contentDescription = stringResource(R.string.action_edit),
-                                    modifier = Modifier.size(16.dp),
-                                )
-                            }
-                        },
-                        trailingIcon = {
-                            IconButton(
-                                onClick = { s.viewModel.deleteProfile(profile.id) },
-                                modifier = Modifier.size(24.dp),
-                            ) {
-                                Icon(
-                                    Icons.Default.Close,
-                                    contentDescription = stringResource(R.string.action_delete),
-                                    modifier = Modifier.size(16.dp),
-                                )
-                            }
-                        },
-                    )
-                }
-            }
+            if (matches) Icon(Icons.Default.Check, stringResource(R.string.profile_applied), tint = ProAccent, modifier = Modifier.size(18.dp))
+            Text(profile.name, modifier = Modifier.weight(1f).padding(start = if (matches) 8.dp else 0.dp), color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            IconButton(onClick = { editProfile = profile }) { Icon(Icons.Default.Edit, stringResource(R.string.action_edit), modifier = Modifier.size(18.dp)) }
+            IconButton(onClick = { deleteProfile = profile }) { Icon(Icons.Default.Close, stringResource(R.string.action_delete), modifier = Modifier.size(18.dp)) }
         }
     }
+
     if (showSave) {
         var name by remember { mutableStateOf("") }
         AlertDialog(
@@ -532,39 +466,63 @@ private fun ProProfilesBlock(s: SharedActions) {
                     value = name,
                     onValueChange = { name = it },
                     label = { Text(stringResource(R.string.profile_name)) },
+                    supportingText = if (name.isBlank()) ({ Text(stringResource(R.string.profile_name_required)) }) else null,
                     singleLine = true,
                 )
             },
             confirmButton = {
-                Button(onClick = { s.viewModel.saveProfile(name); showSave = false }) {
+                Button(enabled = name.isNotBlank(), onClick = { s.viewModel.saveProfile(name); saved = true; showSave = false }) {
                     Text(stringResource(R.string.action_save))
                 }
             },
-            dismissButton = {
-                TextButton(onClick = { showSave = false }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            },
+            dismissButton = { TextButton(onClick = { showSave = false }) { Text(stringResource(R.string.action_cancel)) } },
         )
     }
-    editProfile?.let { p ->
-        var name by remember(p.id) { mutableStateOf(p.name) }
+    editProfile?.let { profile ->
+        var name by remember(profile.id) { mutableStateOf(profile.name) }
         AlertDialog(
             onDismissRequest = { editProfile = null },
             title = { Text(stringResource(R.string.edit_profile_title)) },
-            text = {
-                TextField(value = name, onValueChange = { name = it }, singleLine = true)
-            },
+            text = { TextField(value = name, onValueChange = { name = it }, singleLine = true) },
             confirmButton = {
-                Button(onClick = { s.viewModel.updateProfileName(p, name); editProfile = null }) {
+                Button(enabled = name.isNotBlank(), onClick = { s.viewModel.updateProfileName(profile, name); editProfile = null }) {
                     Text(stringResource(R.string.action_update))
                 }
             },
-            dismissButton = {
-                TextButton(onClick = { editProfile = null }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            },
+            dismissButton = { TextButton(onClick = { editProfile = null }) { Text(stringResource(R.string.action_cancel)) } },
         )
     }
+    deleteProfile?.let { profile ->
+        AlertDialog(
+            onDismissRequest = { deleteProfile = null },
+            title = { Text(stringResource(R.string.delete_profile_title)) },
+            text = { Text(stringResource(R.string.delete_profile_message, profile.name)) },
+            confirmButton = { Button(onClick = { s.viewModel.deleteProfile(profile.id); deleteProfile = null }) { Text(stringResource(R.string.action_delete)) } },
+            dismissButton = { TextButton(onClick = { deleteProfile = null }) { Text(stringResource(R.string.action_cancel)) } },
+        )
+    }
+}
+
+private fun CameraProfile.matches(settings: CameraSettings): Boolean =
+    iso == settings.iso && shutterSpeedNs == settings.shutterSpeedNs && focusDistance == settings.focusDistance &&
+        whiteBalanceMode == settings.whiteBalanceMode && exposureCompensation == settings.exposureCompensation
+
+/** Pure preset generation shared by UI and regression tests. */
+internal object ProControlPresets {
+    private val commonIso = listOf(50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 4000, 5000, 6400, 8000, 10000, 12800)
+    private val shutterDenominators = listOf(8000, 6400, 5000, 4000, 3200, 2500, 2000, 1600, 1250, 1000, 800, 640, 500, 400, 320, 250, 200, 160, 125, 100, 80, 60, 50, 40, 30, 25, 20, 15, 13, 10, 8, 6, 5, 4, 3, 2, 1)
+
+    fun isoValues(range: IntRange): List<Int> =
+        (listOf(range.first) + commonIso.filter { it in range } + range.last).distinct().sorted()
+
+    fun shutterValues(range: LongRange): List<Long> {
+        val fractional = shutterDenominators.map { 1_000_000_000L / it }
+        val long = listOf(2_000_000_000L, 4_000_000_000L, 8_000_000_000L, 15_000_000_000L, 30_000_000_000L)
+        return (listOf(range.first) + (fractional + long).filter { it in range } + range.last).distinct().sorted()
+    }
+
+    fun shutterText(ns: Long): String =
+        if (ns < 1_000_000_000L) "1/${(1_000_000_000.0 / ns.coerceAtLeast(1L)).roundToInt()}"
+        else if (ns % 1_000_000_000L == 0L) "${ns / 1_000_000_000L}s"
+        else "%.1fs".format(Locale.US, ns / 1_000_000_000.0)
 }

@@ -176,7 +176,11 @@ fun CameraScreen(
     val noCameraAvailable by viewModel.noCameraAvailable.collectAsState()
     val lastMedia by viewModel.lastMedia.collectAsState()
 
-    val previewView = remember {
+    val previewOrientation = LocalConfiguration.current.orientation
+    // A PreviewView must not be re-parented between portrait and landscape
+    // AndroidView holders. Sony's Android 11 compositor can retain the old
+    // texture as a ghost strip; create exactly one fresh host per orientation.
+    val previewView = remember(previewOrientation) {
         PreviewView(context).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         }
@@ -187,6 +191,7 @@ fun CameraScreen(
     var qrAnalyzer by remember { mutableStateOf<QrCodeAnalyzer?>(null) }
     var recording by remember { mutableStateOf<Recording?>(null) }
     var camera by remember { mutableStateOf<Camera?>(null) }
+    var cameraReady by remember { mutableStateOf(false) }
     var zoomRatio by remember { mutableFloatStateOf(1f) }
     // Upper bound for pinch zoom. Refreshed from the bound Camera after every
     // (re)bind; falls back to the selected lens capabilities until then.
@@ -283,7 +288,10 @@ fun CameraScreen(
                 context,
                 receiver,
                 android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED),
-                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
+                // BATTERY_CHANGED is emitted by a privileged system process. On
+                // several Sony builds NOT_EXPORTED blocks subsequent updates even
+                // though the initial sticky value is returned.
+                androidx.core.content.ContextCompat.RECEIVER_EXPORTED,
             )
         read(sticky)
         onDispose { runCatching { context.unregisterReceiver(receiver) } }
@@ -348,9 +356,11 @@ fun CameraScreen(
         settings.aspectRatio,
         settings.saveFormat,
         bgRunning,
+        previewView,
     ) {
         val provider = cameraProvider ?: return@LaunchedEffect
         val lens = settings.currentLens ?: return@LaunchedEffect
+        cameraReady = false
 
         // The background recording service owns the physical camera while it runs.
         if (bgRunning) {
@@ -593,6 +603,11 @@ fun CameraScreen(
                 (bound.cameraInfo.zoomState.value?.maxZoomRatio
                     ?: lens.capabilities.maxZoomRatio).coerceAtLeast(1f)
             runCatching { bound.cameraControl.setZoomRatio(1f) }
+            // Recorder and ImageCapture surfaces become usable shortly after
+            // bind returns on some legacy HALs. Blocking the shutter during
+            // this short hand-off prevents zero-frame recordings.
+            kotlinx.coroutines.delay(350)
+            cameraReady = true
         } else {
             zoomRatio = 1f
             maxZoomRatio = lens.capabilities.maxZoomRatio.coerceAtLeast(1f)
@@ -601,7 +616,7 @@ fun CameraScreen(
 
     // Keep still/video output orientation correct while the Activity is not recreated
     // on rotation (android:configChanges).
-    DisposableEffect(Unit) {
+    DisposableEffect(previewView) {
         val dm = context.getSystemService(android.hardware.display.DisplayManager::class.java)
         val listener =
             object : android.hardware.display.DisplayManager.DisplayListener {
@@ -958,7 +973,7 @@ fun CameraScreen(
                             val uri = event.outputResults.outputUri
                             if (external != null) {
                                 onExternalResult(ok, Intent().setData(uri))
-                            } else if (!ok || uri == null) {
+                            } else if (!ok) {
                                 msg(R.string.snack_video_failed, event.error.toString())
                             } else if (settings.cameraMode == CameraMode.SLOWMO) {
                                 // Stretch the high-fps recording into slow motion.
@@ -1436,7 +1451,7 @@ fun CameraScreen(
                 profiles = profiles,
                 bgRunning = bgRunning,
                 timelapseActive = timelapseActive,
-                isCapturing = isCapturing || slowMoProcessing,
+                isCapturing = isCapturing || slowMoProcessing || !cameraReady,
                 isRecording = recording != null,
                 gridOn = appSnapshot.gridLines,
                 mediaThumb = thumb,
@@ -1483,20 +1498,22 @@ fun CameraScreen(
                         Modifier.fillMaxWidth().padding(bottom = 4.dp),
                     )
                 }
-                Box(
-                    Modifier.fillMaxWidth().weight(1f)
-                        .verticalScroll(rememberScrollState())
-                ) {
-                    ProControlArea(shared, proItem)
-                }
                 if (!proLandscape) {
+                    // Keep the live-value deck directly below the viewfinder.
+                    // This removes the large dead zone that previously separated
+                    // the exposure summary from its controls on tall phones.
                     ProIconSelector(
                         shared,
                         proItem,
                         { proItem = it },
                         vertical = false,
-                        modifier = Modifier.padding(vertical = 6.dp),
                     )
+                }
+                Box(
+                    Modifier.fillMaxWidth().weight(1f)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    ProControlArea(shared, proItem)
                 }
                 IphoneModeTabs(shared)
                 if (showShutter) {
@@ -1543,6 +1560,7 @@ fun CameraScreen(
                     ProToolbarBlock(
                         shared,
                         Modifier.fillMaxWidth()
+                            .background(Color.Black)
                             .windowInsetsPadding(WindowInsets.safeDrawing)
                             .padding(horizontal = 12.dp, vertical = 4.dp),
                     )
@@ -1563,7 +1581,10 @@ fun CameraScreen(
                 // Landscape: slim icon strip in the left gap.
                 Row(Modifier.fillMaxSize()) {
                     Column(
-                        Modifier.width(if (compact) 76.dp else 84.dp).fillMaxHeight()
+                        // Two columns keep all eight controls reachable on short
+                        // landscape displays (the former one-column rail clipped
+                        // MIC and PRF on Xperia 1).
+                        Modifier.width(if (compact) 196.dp else 212.dp).fillMaxHeight()
                             .background(Color.Black)
                             .windowInsetsPadding(WindowInsets.safeDrawing),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1607,6 +1628,7 @@ fun CameraScreen(
                         ProToolbarBlock(
                             shared,
                             Modifier.fillMaxWidth()
+                                .background(Color.Black)
                                 .windowInsetsPadding(WindowInsets.safeDrawing)
                                 .padding(horizontal = 12.dp, vertical = 4.dp),
                         )
@@ -1651,7 +1673,7 @@ fun CameraScreen(
                 external = external,
                 bgRunning = bgRunning,
                 timelapseActive = timelapseActive,
-                isCapturing = isCapturing || slowMoProcessing,
+                isCapturing = isCapturing || slowMoProcessing || !cameraReady,
                 isRecording = recording != null,
                 gridOn = appSnapshot.gridLines,
                 mediaThumb = thumb,

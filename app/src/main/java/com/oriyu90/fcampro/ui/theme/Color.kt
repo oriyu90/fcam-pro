@@ -4,7 +4,7 @@ import androidx.compose.ui.graphics.Color
 
 // Fixed dark palette. A camera app is used against a live viewfinder, so the chrome
 // stays dark regardless of the system light/dark setting.
-val FcamAccent = Color(0xFFFFC845)
+val FcamAccent = Color(0xFFFF9F0A)
 val FcamOnAccent = Color(0xFF1A1300)
 val FcamSurface = Color(0xFF121212)
 val FcamSurfaceVariant = Color(0xFF1E1E1E)

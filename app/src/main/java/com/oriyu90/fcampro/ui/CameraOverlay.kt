@@ -539,6 +539,7 @@ private fun androidx.compose.foundation.layout.BoxScope.CollapsedCluster(
     var offset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     val cfg = LocalConfiguration.current
     val density = androidx.compose.ui.platform.LocalDensity.current
+    val cdControls = stringResource(R.string.cd_controls)
     // Keep the draggable cluster from leaving the screen.
     val maxX = with(density) { (cfg.screenWidthDp.dp.toPx() * 0.42f) }
     val maxY = with(density) { (cfg.screenHeightDp.dp.toPx() * 0.42f) }
@@ -560,7 +561,7 @@ private fun androidx.compose.foundation.layout.BoxScope.CollapsedCluster(
                 }
                 .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(24.dp))
                 .padding(8.dp)
-                .semantics { contentDescription = "controls" },
+                .semantics { contentDescription = cdControls },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -792,9 +793,10 @@ internal fun FrontBackButton(s: SharedActions) {
 @Composable
 internal fun BatteryPill(pct: Int?) {
     if (pct == null) return
+    val cdBattery = stringResource(R.string.cd_battery)
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.semantics { contentDescription = "battery" },
+        modifier = Modifier.semantics { contentDescription = cdBattery },
     ) {
         Icon(
             Icons.Default.BatteryStd,

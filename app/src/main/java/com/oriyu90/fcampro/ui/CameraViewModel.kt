@@ -516,11 +516,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun saveProfile(name: String) {
         val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
         viewModelScope.launch {
             val s = _settings.value
             repository.insert(
                 CameraProfile(
-                    name = trimmed.ifEmpty { "" },
+                    name = trimmed,
                     iso = s.iso,
                     shutterSpeedNs = s.shutterSpeedNs,
                     focusDistance = s.focusDistance,
@@ -536,7 +537,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun updateProfileName(profile: CameraProfile, newName: String) {
-        viewModelScope.launch { repository.update(profile.copy(name = newName.trim())) }
+        val trimmed = newName.trim()
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch { repository.update(profile.copy(name = trimmed)) }
     }
 
     fun loadProfile(profile: CameraProfile) {

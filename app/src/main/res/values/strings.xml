@@ -36,6 +36,7 @@
     <string name="panel_pos_bottom">Bottom</string>
     <string name="cd_battery">Battery level</string>
     <string name="cd_move_controls">Drag to move the controls</string>
+    <string name="cd_controls">Camera controls</string>
 
     <!-- Manual controls -->
     <string name="label_iso">ISO</string>
@@ -73,6 +74,25 @@
     <string name="edit_profile_title">Edit profile name</string>
     <string name="profile_saved">Profile saved</string>
     <string name="profile_unnamed">Untitled</string>
+    <string name="profiles_title">Capture profiles</string>
+    <string name="profile_count">%1$d saved</string>
+    <string name="profiles_empty">No profiles yet</string>
+    <string name="profile_name_required">Enter a profile name</string>
+    <string name="profile_applied">Applied profile</string>
+    <string name="delete_profile_title">Delete profile?</string>
+    <string name="delete_profile_message">Delete “%1$s”? This cannot be undone.</string>
+
+    <!-- Pro white balance / focus -->
+    <string name="focus_continuous">AF-C</string>
+    <string name="focus_fixed">This lens has fixed focus.</string>
+    <string name="focus_near_far">Far — Near</string>
+    <string name="wb_incandescent">Incandescent</string>
+    <string name="wb_fluorescent">Fluorescent</string>
+    <string name="wb_warm_fluorescent">Warm fluorescent</string>
+    <string name="wb_daylight">Daylight</string>
+    <string name="wb_cloudy">Cloudy</string>
+    <string name="wb_twilight">Twilight</string>
+    <string name="wb_shade">Shade</string>
 
     <!-- Mode tabs -->
     <string name="tab_photo">PHOTO</string>

@@ -36,6 +36,7 @@
     <string name="panel_pos_bottom">下</string>
     <string name="cd_battery">バッテリー残量</string>
     <string name="cd_move_controls">ドラッグで移動</string>
+    <string name="cd_controls">カメラ操作</string>
 
     <!-- マニュアル操作 -->
     <string name="label_iso">ISO</string>
@@ -73,6 +74,25 @@
     <string name="edit_profile_title">プロファイル名を編集</string>
     <string name="profile_saved">プロファイルを保存しました</string>
     <string name="profile_unnamed">名称未設定</string>
+    <string name="profiles_title">撮影プロファイル</string>
+    <string name="profile_count">%1$d件保存済み</string>
+    <string name="profiles_empty">プロファイルはまだありません</string>
+    <string name="profile_name_required">プロファイル名を入力してください</string>
+    <string name="profile_applied">適用中のプロファイル</string>
+    <string name="delete_profile_title">プロファイルを削除しますか？</string>
+    <string name="delete_profile_message">「%1$s」を削除します。この操作は元に戻せません。</string>
+
+    <!-- Proホワイトバランス／フォーカス -->
+    <string name="focus_continuous">AF-C</string>
+    <string name="focus_fixed">このレンズは固定フォーカスです。</string>
+    <string name="focus_near_far">遠 — 近</string>
+    <string name="wb_incandescent">電球</string>
+    <string name="wb_fluorescent">蛍光灯</string>
+    <string name="wb_warm_fluorescent">暖色蛍光灯</string>
+    <string name="wb_daylight">太陽光</string>
+    <string name="wb_cloudy">曇天</string>
+    <string name="wb_twilight">薄明</string>
+    <string name="wb_shade">日陰</string>
 
     <!-- モードタブ -->
     <string name="tab_photo">写真</string>

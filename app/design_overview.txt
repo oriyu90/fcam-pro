@@ -1,4 +1,15 @@
-# Fcam pro — 設計概要と実装状況（v2.3.0）
+# Fcam pro — 設計概要と実装状況（v2.4.0）
+
+## v2.4.0 の変更点（Photography Pro 参考のプロUI・GUI安定化）
+
+- **操作モデル**: プロ設定を ISO / SS / AF / WB / EV / FMT / MIC / PRF の現在値付きセルへ統一。選択後は端末の CameraCharacteristics に収まる写真用プリセットを横スクロールで提示し、詳細調整が必要なフォーカスだけ安全な連続スライダーを併用する。SS/F/EV/ISO の撮影サマリーは常時固定表示。
+- **縦横レスポンシブ**: スマホ縦はプレビュー→サマリー→横デッキ→操作面→シャッターの順にし、空白領域を解消。横は左レールを 2 列化し、Xperia 1 の低い有効高でも PRF/FMT/MIC まで欠けず到達できる。タブレットを含む 4 配置は純粋関数のマトリクステストで固定。
+- **撮影プロファイル**: 現在設定を任意名で作成し、適用中を視覚表示。作成・改名の空名を UI と ViewModel の二層で拒否し、削除は確認ダイアログを必須化。既存 Room v2 のスキーマと保存データは変更しない。
+- **クラッシュ／撮影安全性**: 回転時は向きごとに PreviewView を再生成して stale texture の再親子付けを防止し、単一 AndroidView の原則を維持。bind 完了前 350ms はシャッターを抑止し、モード切替直後の 0-frame 動画を防止。露出の ISO/SS 原子性、3段 bind フォールバック、既存の保存経路は維持。
+- **Sony端末互換**: edge-to-edge の system bar とプロツールバーを黒で確定し、旧 Sony compositor で出ていた前フレームの細い残像を解消。ACTION_BATTERY_CHANGED receiver は保護された system broadcast を受ける exported 登録へ修正し、Permission Denial を解消。
+- **アクセシビリティ／翻訳**: タッチ対象を 58dp、境界線を黒背景比 3:1 以上、選択色をオレンジへ統一。新規文言と contentDescription を英語既定／日本語で 164 件ずつ完全一致させた。
+- **検証**: Xperia 1 SOV40 で日本語・英語、縦横、5回連続回転、3レンズ切替、静止画、音声あり／なし動画、プロファイル作成、ISO原子性、モード直後連打を確認。単体テスト 26 件、Android lint、debug/release build、署名指紋を検証。
+- versionCode 10 / versionName 2.4.0。Room schema と minSdk 24 は据え置きで破壊的変更なし。
 
 ## v2.3.0 の変更点（S24 検証フィードバック対応）
 
@@ -136,7 +147,7 @@ versionCode 4 / versionName 2.0.0。
 - AndroidX AppCompat の per-app locale（アプリ内言語切替）
 - LifecycleService + フォアグラウンドサービス（バックグラウンド録画）
 - compileSdk 36 / minSdk 24 / targetSdk 36。追加 API は全て SDK_INT でガード。
-- パッケージ: com.oriyu90.fcampro / applicationId 同じ / versionCode 5 / versionName 2.1.0
+- パッケージ: com.oriyu90.fcampro / applicationId 同じ / versionCode 10 / versionName 2.4.0
 
 ## 2. 実装済み機能
 
@@ -160,17 +171,16 @@ versionCode 4 / versionName 2.0.0。
 | 設定画面 | 言語、既定アスペクト比、既定タイマー、タイムラプス間隔、シャッター音、バックグラウンド音声、バージョン、開発者サイト等へのリンク |
 | UI | 固定ダークテーマ。エッジトゥエッジ（safeDrawing インセット）。縦画面は縦積み、横画面・幅 600dp 以上は右サイドの縦レール。キャプチャボタンに contentDescription |
 
-## 3. 既知の制約（v2.1.0 時点で継続）
+## 3. 既知の制約（v2.4.0 時点）
 
 - バックグラウンド録画はプロセス生存が前提（画面オフ・アプリバックグラウンドは可）。タスク除去・プロセス終了で停止。完全デタッチの無制限録画は対象外。
-- スローモーション / パノラマは OTHERS に UI エントリのみ。実処理は未実装（将来枠）。High-Speed Capture Session / OpenCV スティッチングが必要。
+- スローモーションは端末の constrained high-speed video が 60fps 以上の場合に利用でき、保存時に音声を除いて30fps基準へ時間伸長する。パノラマは平行移動推定＋フェザーブレンドのため、強い視差では継ぎ目が出る場合がある。
 - 論理マルチカメラの背後に隠れた物理サブカメラは個別選択できない場合がある。
-- 実機カメラ挙動の QA は未実施。コンパイル・単体テスト（Robolectric）・lint・署名検証のみで判断。
+- Xperia 1 SOV40 と Galaxy S24 SC-51E で主要経路を確認済み。全メーカー・全 HAL 構成の網羅はしていない。
 - シャッター音は MediaActionSound の再生有無のみ制御（Android の仕様上、細かな音量制御・強制音の抑止は不可）。
 
 ## 4. 今後の候補
 
-- スローモーション（Camera2 高速キャプチャ）とパノラマ（ネイティブ画像合成）の実装
 - 実機マトリクス（各社フラッグシップ、折りたたみ、タブレット）での QA と Roborazzi スクリーンショット回帰
 - Play Store 配信に向けた R8/リソース圧縮の有効化と ProGuard ルール検証
-- 位置情報タグ付け、RAW（DNG）保存、水準器、ヒストグラム
+- 位置情報タグ付け、水準器、ヒストグラム

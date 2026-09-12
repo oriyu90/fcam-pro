@@ -56,6 +56,13 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Camera frames behind transparent system bars create bright flashes
+        // and stale preview slivers on older Sony compositors. Keep the app
+        // edge-to-edge, but make both system-bar backdrops predictably black.
+        @Suppress("DEPRECATION")
+        window.statusBarColor = android.graphics.Color.BLACK
+        @Suppress("DEPRECATION")
+        window.navigationBarColor = android.graphics.Color.BLACK
 
         externalSpec.value = parseExternalCapture(intent)
 

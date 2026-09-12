@@ -15,9 +15,12 @@ import com.oriyu90.fcampro.ui.CameraViewModel
 import com.oriyu90.fcampro.ui.ExposureComp
 import com.oriyu90.fcampro.ui.LensCapabilities
 import com.oriyu90.fcampro.ui.ManualExposure
+import com.oriyu90.fcampro.ui.ProArrangement
+import com.oriyu90.fcampro.ui.ProControlPresets
 import com.oriyu90.fcampro.ui.SaveFormat
 import com.oriyu90.fcampro.ui.dedupeLenses
 import com.oriyu90.fcampro.ui.formatStorageGb
+import com.oriyu90.fcampro.ui.proArrangement
 import com.oriyu90.fcampro.ui.ZoomRatios
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -463,5 +466,36 @@ class CameraViewModelTest {
         assertEquals(SaveFormat.JPEG, vm.settings.value.saveFormat)
         vm.setSaveFormat(SaveFormat.JPEG_RAW)
         assertEquals(SaveFormat.JPEG, vm.settings.value.saveFormat)
+    }
+
+    @Test
+    fun proPresetValuesStayInsideCameraRanges() {
+        val iso = ProControlPresets.isoValues(73..730)
+        assertEquals(73, iso.first())
+        assertEquals(730, iso.last())
+        assertTrue(iso.all { it in 73..730 })
+        assertEquals(iso.distinct(), iso)
+
+        val shutter = ProControlPresets.shutterValues(1_000_000L..100_000_000L)
+        assertEquals(1_000_000L, shutter.first())
+        assertEquals(100_000_000L, shutter.last())
+        assertTrue(shutter.all { it in 1_000_000L..100_000_000L })
+        assertEquals(shutter.distinct(), shutter)
+    }
+
+    @Test
+    fun proShutterLabelsArePhotographicAndSafeAtZero() {
+        assertEquals("1/8000", ProControlPresets.shutterText(125_000L))
+        assertEquals("1/60", ProControlPresets.shutterText(16_666_667L))
+        assertEquals("1s", ProControlPresets.shutterText(1_000_000_000L))
+        assertEquals("1/1000000000", ProControlPresets.shutterText(0L))
+    }
+
+    @Test
+    fun proLayoutCoversEveryWindowClassAndOrientation() {
+        assertEquals(ProArrangement.PHONE_PORTRAIT, proArrangement(compact = true, landscape = false))
+        assertEquals(ProArrangement.PHONE_LANDSCAPE, proArrangement(compact = true, landscape = true))
+        assertEquals(ProArrangement.TABLET_PORTRAIT, proArrangement(compact = false, landscape = false))
+        assertEquals(ProArrangement.TABLET_LANDSCAPE, proArrangement(compact = false, landscape = true))
     }
 }
