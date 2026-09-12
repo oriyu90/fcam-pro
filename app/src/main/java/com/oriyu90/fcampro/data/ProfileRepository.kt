@@ -9,5 +9,7 @@ class ProfileRepository(private val dao: CameraProfileDao) {
 
     suspend fun update(profile: CameraProfile) = dao.updateProfile(profile)
 
+    suspend fun updateAll(profiles: List<CameraProfile>) = dao.updateProfiles(profiles)
+
     suspend fun deleteById(id: Int) = dao.deleteProfileById(id)
 }

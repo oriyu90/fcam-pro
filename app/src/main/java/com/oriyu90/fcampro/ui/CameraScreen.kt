@@ -52,6 +52,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -118,6 +119,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -175,18 +177,20 @@ fun CameraScreen(
     val bgRunning by BackgroundCameraService.running.collectAsState()
     val noCameraAvailable by viewModel.noCameraAvailable.collectAsState()
     val lastMedia by viewModel.lastMedia.collectAsState()
+    val currentOrientation = LocalConfiguration.current.orientation
 
-    val previewOrientation = LocalConfiguration.current.orientation
-    // A PreviewView must not be re-parented between portrait and landscape
-    // AndroidView holders. Sony's Android 11 compositor can retain the old
-    // texture as a ghost strip; create exactly one fresh host per orientation.
-    val previewView = remember(previewOrientation) {
+    // One PreviewView and one movable AndroidView owner survive mode and orientation
+    // changes. Reusing the raw View from separate AndroidView call sites caused
+    // parent races and frozen TextureViews on Sony's Android 11 compositor.
+    val previewView = remember {
         PreviewView(context).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            scaleType = PreviewView.ScaleType.FIT_CENTER
         }
     }
     var cameraProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
+    var previewUseCase by remember { mutableStateOf<Preview?>(null) }
     var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
     var qrAnalyzer by remember { mutableStateOf<QrCodeAnalyzer?>(null) }
     var recording by remember { mutableStateOf<Recording?>(null) }
@@ -220,6 +224,14 @@ fun CameraScreen(
     val panoMaxFrames = PanoEstimate.maxFrames(memoryClassMb)
 
     val appSnapshot by appSettings.state.collectAsState()
+    val modeBar =
+        remember(appSnapshot.modeBar) {
+            ModeBarOrder.sanitize(
+                appSnapshot.modeBar.mapNotNull { raw ->
+                    runCatching { CameraMode.valueOf(raw) }.getOrNull()
+                }
+            )
+        }
     var batteryPct by remember { mutableStateOf<Int?>(null) }
     var thumb by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     var focusPoint by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
@@ -450,8 +462,15 @@ fun CameraScreen(
                         fpsRange,
                     )
             }
-            val pv = pb.build().also { it.surfaceProvider = previewView.surfaceProvider }
-            val vc = vb.build()
+            val pv =
+                pb.build().also {
+                    previewUseCase = it
+                    it.targetRotation = previewView.display?.rotation ?: android.view.Surface.ROTATION_0
+                    it.surfaceProvider = previewView.surfaceProvider
+                }
+            val vc = vb.build().also {
+                it.targetRotation = previewView.display?.rotation ?: android.view.Surface.ROTATION_0
+            }
             videoCapture = vc
             return provider.bindToLifecycle(lifecycleOwner, selector, pv, vc)
         }
@@ -503,6 +522,8 @@ fun CameraScreen(
                         }
                     fun buildPreview(): Preview =
                         previewBuilder.build().also {
+                            previewUseCase = it
+                            it.targetRotation = previewView.display?.rotation ?: android.view.Surface.ROTATION_0
                             it.surfaceProvider = previewView.surfaceProvider
                         }
                     fun buildStillCapture(): ImageCapture {
@@ -525,7 +546,9 @@ fun CameraScreen(
                                 Camera2Interop.Extender(icBuilder).setPhysicalCameraId(pid)
                             }
                         }
-                        return icBuilder.build()
+                        return icBuilder.build().also {
+                            it.targetRotation = previewView.display?.rotation ?: android.view.Surface.ROTATION_0
+                        }
                     }
                     fun bindFull(pv: Preview, ic: ImageCapture): Camera {
                         if (settings.cameraMode == CameraMode.PANORAMA) {
@@ -626,12 +649,29 @@ fun CameraScreen(
 
                 override fun onDisplayChanged(displayId: Int) {
                     val rotation = previewView.display?.rotation ?: return
+                    previewUseCase?.targetRotation = rotation
                     imageCapture?.targetRotation = rotation
                     videoCapture?.targetRotation = rotation
+                    previewView.post {
+                        previewView.requestLayout()
+                        previewView.invalidate()
+                    }
                 }
             }
         dm?.registerDisplayListener(listener, android.os.Handler(android.os.Looper.getMainLooper()))
         onDispose { dm?.unregisterDisplayListener(listener) }
+    }
+
+    // Some Android 11 devices update Configuration before DisplayManager emits its
+    // callback. Refresh transforms from both signals without tearing down the camera.
+    LaunchedEffect(currentOrientation, previewView) {
+        kotlinx.coroutines.delay(32)
+        val rotation = previewView.display?.rotation ?: android.view.Surface.ROTATION_0
+        previewUseCase?.targetRotation = rotation
+        imageCapture?.targetRotation = rotation
+        videoCapture?.targetRotation = rotation
+        previewView.requestLayout()
+        previewView.invalidate()
     }
 
     // --- Manual controls -> Camera2 -----------------------------------
@@ -1307,12 +1347,16 @@ fun CameraScreen(
         containerColor = Color.Black,
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
+        val movablePreview =
+            remember(previewView) {
+                movableContentOf<Modifier> { hostModifier ->
+                    AndroidView(factory = { previewView }, modifier = hostModifier)
+                }
+            }
         @Composable
         fun PreviewSurface(modifier: Modifier) {
-            AndroidView(
-                factory = { previewView },
-                modifier =
-                    modifier
+            movablePreview(
+                modifier
                         .onSizeChanged { previewSize = it }
                         .pointerInput(camera, settings.isManualMode, settings.focusDistance, focusLocked) {
                             detectTapGestures { offset -> onPreviewTap(offset) }
@@ -1334,7 +1378,7 @@ fun CameraScreen(
                                     ZoomRatios.next(zoomRatio, zoom, maxZoomRatio)
                                 runCatching { cam.cameraControl.setZoomRatio(zoomRatio) }
                             }
-                        },
+                        }
             )
         }
 
@@ -1472,6 +1516,8 @@ fun CameraScreen(
                 onCancelPanorama = ::cancelPanorama,
                 onToggleBackground = ::toggleBackground,
                 onOpenSettings = onOpenSettings,
+                modeBar = modeBar,
+                onSetModeBar = { updated -> appSettings.modeBar = updated.map { it.name } },
             )
 
         @Composable
@@ -1481,6 +1527,21 @@ fun CameraScreen(
                 PreviewDecor()
                 ProStatusTexts(shared, Modifier.align(Alignment.TopStart))
                 ProLensTexts(shared, Modifier.align(Alignment.CenterEnd))
+            }
+        }
+
+        /** Fits one immutable-aspect preview frame inside both width and height limits. */
+        @Composable
+        fun AspectFitPreviewFrame(
+            modifier: Modifier,
+            alignment: Alignment = Alignment.Center,
+            content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit,
+        ) {
+            BoxWithConstraints(modifier = modifier, contentAlignment = alignment) {
+                val widthFromHeight = maxHeight * streamAspect
+                val frameWidth = if (widthFromHeight <= maxWidth) widthFromHeight else maxWidth
+                val frameHeight = frameWidth / streamAspect
+                Box(Modifier.size(frameWidth, frameHeight), content = content)
             }
         }
 
@@ -1515,6 +1576,7 @@ fun CameraScreen(
                 ) {
                     ProControlArea(shared, proItem)
                 }
+                ProProfileDock(shared)
                 IphoneModeTabs(shared)
                 if (showShutter) {
                     ShutterBar(shared)
@@ -1541,15 +1603,9 @@ fun CameraScreen(
                 // Capture-range-accurate preview in every mode: the box matches
                 // the still aspect so WYSIWYG holds (full-bleed FILL_CENTER
                 // would crop 4:3 captures on tall screens).
-                Box(
-                    when {
-                        !proLandscape ->
-                            Modifier.fillMaxWidth().aspectRatio(streamAspect)
-                                .align(Alignment.TopCenter)
-                        else ->
-                            Modifier.fillMaxHeight().aspectRatio(streamAspect)
-                                .align(Alignment.CenterStart)
-                    }
+                AspectFitPreviewFrame(
+                    modifier = Modifier.fillMaxSize(),
+                    alignment = if (proLandscape) Alignment.CenterStart else Alignment.TopCenter,
                 ) {
                     PreviewSurface(Modifier.fillMaxSize())
                     PreviewDecor()
@@ -1603,15 +1659,13 @@ fun CameraScreen(
                     ) {
                         // Reserved summary row: the aspect box alone would take
                         // the full height and squeeze the summary to 0px.
-                        Box(
-                            Modifier.fillMaxWidth().weight(1f),
-                            contentAlignment = Alignment.Center,
+                        AspectFitPreviewFrame(
+                            modifier = Modifier.fillMaxWidth().weight(1f).padding(vertical = 12.dp),
                         ) {
-                            ProPreviewBox(
-                                Modifier.fillMaxHeight()
-                                    .padding(vertical = 12.dp)
-                                    .aspectRatio(streamAspect)
-                            )
+                            PreviewSurface(Modifier.fillMaxSize())
+                            PreviewDecor()
+                            ProStatusTexts(shared, Modifier.align(Alignment.TopStart))
+                            ProLensTexts(shared, Modifier.align(Alignment.CenterEnd))
                         }
                         ProSummaryLine(shared, Modifier.padding(bottom = 4.dp))
                     }
@@ -1684,6 +1738,8 @@ fun CameraScreen(
                 onResetZoom = ::resetZoom,
                 panelCollapsed = appSnapshot.panelCollapsed,
                 panelGravity = appSnapshot.panelGravity,
+                modeBar = modeBar,
+                onSetModeBar = { updated -> appSettings.modeBar = updated.map { it.name } },
                 onSetPanelCollapsed = { appSettings.panelCollapsed = it },
                 onSetPanelGravity = { appSettings.panelGravity = it },
                 onToggleGrid = { appSettings.gridLines = !appSettings.gridLines },

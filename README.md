@@ -16,10 +16,10 @@ localized Japanese / English interface.
 | Area | What you get |
 |---|---|
 | Capture | Photo, video, slow-motion & panorama, 4:3 / 16:9, self-timer (0/3/10 s), flash auto/on/off, rule-of-thirds grid, tap to lock / unlock focus, pinch-to-zoom with an on-screen ratio pill (tap to reset to 1.0x; camera and UI always start at 1.0x), one-tap jump to the system gallery |
-| Manual controls | A Photography Pro-inspired control deck for ISO, shutter speed, focus, white balance, EV, format, microphone and profiles. Each item shows its live value and offers photographic presets limited to the selected lens's reported range. Exposure stays atomic: setting ISO or speed fills the other with a safe, clamped default. RAW-capable lenses expose JPEG / JPEG+RAW / RAW (DNG) choices |
+| Manual controls | A Photography Pro-inspired control deck for ISO, shutter speed, focus, white balance, EV, format and microphone, followed by a dedicated profile dock. Each item shows its live value and offers photographic presets limited to the selected lens's reported range. Exposure stays atomic: setting ISO or speed fills the other with a safe, clamped default. RAW-capable lenses expose JPEG / JPEG+RAW / RAW (DNG) choices |
 | Lenses | Ultra-wide / wide / tele / macro / front — binds the real `cameraId`, including sub-cameras hidden behind a logical multi-camera (e.g. Galaxy telephoto) via `setPhysicalCameraId`; depth-only cameras are excluded, same-focal logical/physical twins are deduped; a zoom-factor pill row (×0.5 / ×1 / ×2 …) in phone mode, switcher row on larger screens. Aperture (f-number) is shown when the HAL reports it |
-| Adaptive UI | Phone-portrait uses a bottom shutter bar (thumbnail | large shutter | front-back switch) with centered zoom pills and a scrollable mode selector; ≥600 dp portrait shows a floating left panel with two-column icons, vertical mode tabs and top/center/bottom alignment — the panel widens while the manual panel is open; landscape shows a right side-rail. The panel collapses to a draggable shutter + battery + "expand" cluster |
-| Profiles | Create, apply, rename and delete your own capture setups. Blank names are rejected and deletion requires confirmation; Room migrations preserve existing profiles across updates |
+| Adaptive UI | The preview keeps the selected capture aspect in portrait and landscape while controls rotate around it. Pro mode uses a Photography Pro-inspired portrait deck and a two-column landscape rail. The default mode bar is Photo / Video / Others; Slow motion and Panorama can be dragged out of Others and any optional bar mode can be dragged back |
+| Profiles | The permanent Pro dock has an icon-only save button plus color-coded profile buttons. Save as new or overwrite, choose one of six colors, apply with a tap, long-drag to reorder, or keep holding for confirmed deletion. Room migrations preserve existing profiles across updates |
 | OTHERS | Time-lapse (configurable 1–10 s interval, auto-stop on repeated errors), background video recording via a foreground service with an elapsed-time notification (continues the active lens, disabled shutter/lens UI while running), QR detection with open / copy |
 | System integration | Registers for `IMAGE_CAPTURE` / `VIDEO_CAPTURE` / `STILL_IMAGE_CAMERA`, so it can be set as the OS default camera app and returns results to the caller |
 | Localization | English (default) and 日本語, switchable in-app; initial value follows the device locale |
@@ -81,7 +81,7 @@ app/src/main/java/com/oriyu90/fcampro/
     └── theme/               # fixed dark Material 3 theme
 ```
 
-## Known limitations (v2.4.0)
+## Known limitations (v2.5.0)
 
 - Background recording continues while the process is alive (screen off / app
   backgrounded). Fully detached indefinite recording is out of scope.
@@ -102,8 +102,9 @@ app/src/main/java/com/oriyu90/fcampro/
 - Physical sub-cameras hidden behind a logical multi-camera cannot always be
   selected individually; the app falls back to the default camera for that facing.
 - This release was exercised on an Xperia 1 (Android, Japanese and English UI)
-  in portrait and landscape, including rotation stress, physical-lens switching,
-  still capture, video with and without audio, profiles and rapid mode changes.
+  in portrait and landscape, including 12 rapid Pro/normal transitions, nine
+  forced rotations without process or preview-surface replacement, 4:3 / 16:9,
+  mode-bar persistence, still capture, video and profile workflows.
   Camera HAL behaviour can still vary on other device families.
 
 ## License
@@ -122,11 +123,12 @@ MIT — see [LICENSE](LICENSE). Author: **Yuki_Orita** (折田悠希 / おりた
 ### 主な機能
 
 - 写真／動画／スローモーション／パノラマ、4:3・16:9、セルフタイマー（0/3/10 秒）、フラッシュ、三分割グリッド、タップでフォーカス固定／解除、ピンチズーム（画面に倍率表示、タップで1倍にリセット。起動時はUI・カメラとも必ず1倍）、標準ギャラリーへのワンタップ遷移
-- Photography Pro を参考にした操作デッキから ISO・シャッター速度・フォーカス距離・ホワイトバランス・露出補正・保存形式・マイク・撮影プロファイルを選択。現在値を常時表示し、選択中の物理カメラが報告する範囲内の実用的なプリセットだけを提示。露出の手動化は不可分で、ISO・速度の片方だけ設定するともう片方を安全な既定値で補完。センサーRAW対応レンズでは JPEG／JPEG+RAW／RAW（DNG）を選択可能
+- Photography Pro を参考にした操作デッキから ISO・シャッター速度・フォーカス距離・ホワイトバランス・露出補正・保存形式・マイクを選択し、その下に専用プロファイルドックを配置。現在値を常時表示し、選択中の物理カメラが報告する範囲内の実用的なプリセットだけを提示。露出の手動化は不可分で、ISO・速度の片方だけ設定するともう片方を安全な既定値で補完。センサーRAW対応レンズでは JPEG／JPEG+RAW／RAW（DNG）を選択可能
 - 超広角／広角／望遠／マクロ／前面レンズを実 `cameraId` で切り替え（論理マルチカメラ背後のサブカメラ＝Galaxy の望遠等も `setPhysicalCameraId` で対応）。HAL が報告する絞り値（F値）を表示
-- プロモード時は専用レイアウト：縮小プレビュー＋上部状態帯（バッテリー／モード／空き容量／焦点距離）、SS・F値・EV・ISO サマリー、現在値付きの設定デッキ、設定集中パネル＋シャッター。縦画面は Photography Pro を縦向きに再構成した上下配置、横画面は全項目が欠けない2列サイドデッキ
+- プロモード時は専用レイアウト：選択した4:3／16:9のプレビュー形状を縦横で変えず、上部状態帯（バッテリー／モード／空き容量／焦点距離）、SS・F値・EV・ISO サマリー、現在値付きの設定デッキ、設定集中パネル＋シャッターを配置。縦画面は Photography Pro を縦向きに再構成した上下配置、横画面は全項目が欠けない2列サイドデッキ
 - 画面に応じた操作パネル: スマホ縦は従来の縦積み、≥600dp 縦は左に浮くパネル（アイコン 2 列・縦タブ・上/中央/下寄せ）、横向きは右のサイドバー。パネルは開閉でき、閉じるとシャッター＋バッテリー＋展開ボタンだけの移動可能なクラスタになる
-- 任意の名前で撮影プロファイルを作成・適用・改名・削除。空名を拒否し、削除時は確認を表示。Room の既存データはアップデート時も保持
+- プロ画面に常設したフロッピーアイコンから、色を選んで新規プロファイルを作成、または既存を上書き。色付きボタンをタップして適用、長押しドラッグで並び替え、さらに保持すると削除確認を表示。Room の既存データはアップデート時も保持
+- 初期モードバーは写真／動画／その他。スロー／パノラマは「その他」に入り、下方向へのドラッグでバーへ追加できる。バー上の任意モードは並び替え・上方向ドラッグで「その他」へ戻せ、構成は再起動後も保持
 - タイムラプス（間隔 1〜10 秒、連続エラー時に自動停止）、バックグラウンド録画（使用中のレンズを引き継ぎ、録画中はシャッター・レンズ切替を無効化）、QR 検出
 - `IMAGE_CAPTURE` / `VIDEO_CAPTURE` に対応し、OS の標準カメラアプリに設定可能
 - 固定ダークテーマ、エッジトゥエッジ対応、カメラ処理は全て例外安全

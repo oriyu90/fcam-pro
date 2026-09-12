@@ -15,6 +15,8 @@ import com.oriyu90.fcampro.ui.CameraViewModel
 import com.oriyu90.fcampro.ui.ExposureComp
 import com.oriyu90.fcampro.ui.LensCapabilities
 import com.oriyu90.fcampro.ui.ManualExposure
+import com.oriyu90.fcampro.ui.ModeBarOrder
+import com.oriyu90.fcampro.ui.CameraMode
 import com.oriyu90.fcampro.ui.ProArrangement
 import com.oriyu90.fcampro.ui.ProControlPresets
 import com.oriyu90.fcampro.ui.SaveFormat
@@ -497,5 +499,34 @@ class CameraViewModelTest {
         assertEquals(ProArrangement.PHONE_LANDSCAPE, proArrangement(compact = true, landscape = true))
         assertEquals(ProArrangement.TABLET_PORTRAIT, proArrangement(compact = false, landscape = false))
         assertEquals(ProArrangement.TABLET_LANDSCAPE, proArrangement(compact = false, landscape = true))
+    }
+
+    @Test
+    fun modeBarDefaultsToPhotoVideoOthersAndSanitizesDuplicates() {
+        assertEquals(
+            listOf(CameraMode.PHOTO, CameraMode.VIDEO, CameraMode.OTHERS),
+            ModeBarOrder.default,
+        )
+        assertEquals(
+            listOf(CameraMode.SLOWMO, CameraMode.PHOTO, CameraMode.OTHERS),
+            ModeBarOrder.sanitize(
+                listOf(CameraMode.SLOWMO, CameraMode.PHOTO, CameraMode.SLOWMO),
+            ),
+        )
+    }
+
+    @Test
+    fun modeBarSupportsAddingRemovingAndReorderingOptionalModes() {
+        val withSlow = ModeBarOrder.add(ModeBarOrder.default, CameraMode.SLOWMO)
+        assertEquals(
+            listOf(CameraMode.PHOTO, CameraMode.VIDEO, CameraMode.SLOWMO, CameraMode.OTHERS),
+            withSlow,
+        )
+        assertEquals(
+            listOf(CameraMode.SLOWMO, CameraMode.PHOTO, CameraMode.VIDEO, CameraMode.OTHERS),
+            ModeBarOrder.move(withSlow, CameraMode.SLOWMO, 0),
+        )
+        assertEquals(ModeBarOrder.default, ModeBarOrder.remove(withSlow, CameraMode.SLOWMO))
+        assertTrue(ModeBarOrder.remove(withSlow, CameraMode.OTHERS).contains(CameraMode.OTHERS))
     }
 }

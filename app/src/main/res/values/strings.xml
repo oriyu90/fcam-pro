@@ -79,6 +79,13 @@
     <string name="profiles_empty">No profiles yet</string>
     <string name="profile_name_required">Enter a profile name</string>
     <string name="profile_applied">Applied profile</string>
+    <string name="profile_save_or_overwrite">Save or overwrite profile</string>
+    <string name="profile_save_choice_hint">Create a profile with a color, or overwrite an existing profile with the current settings.</string>
+    <string name="profile_create_new">Create new</string>
+    <string name="profile_overwrite">Overwrite</string>
+    <string name="profile_color">Profile color</string>
+    <string name="profile_color_option">Profile color option %1$d</string>
+    <string name="mode_drag_hint">Drag a mode down to add it to the bar. Drag a bar mode up to return it here.</string>
     <string name="delete_profile_title">Delete profile?</string>
     <string name="delete_profile_message">Delete “%1$s”? This cannot be undone.</string>
 

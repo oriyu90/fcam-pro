@@ -1,4 +1,14 @@
-# Fcam pro — 設計概要と実装状況（v2.4.0）
+# Fcam pro — 設計概要と実装状況（v2.5.0）
+
+## v2.5.0 の変更点（プレビュー所有権・固定アスペクト・編集可能モードバー・カラープロファイル）
+
+- **単一プレビュー所有権**: `PreviewView` を画面向きから独立した単一インスタンスとし、`movableContentOf` 内の唯一の `AndroidView` が通常／プロ／縦／横の配置間を移動する。向き変更は Preview / ImageCapture / VideoCapture の `targetRotation` とレイアウトだけを更新し、カメラ bind や Surface の再生成を起こさない。
+- **固定アスペクト**: `FIT_CENTER` と `BoxWithConstraints` で、選択した 4:3 / 16:9 の矩形を幅・高さの両制約内へ内接させる。端末の向きによってプレビュー矩形を回転・変形せず、UI の配置と撮影時の下方向だけを切り替える。
+- **モードバー編集**: 既定を PHOTO / VIDEO / OTHERS とし、SLOWMO / PANORAMA は OTHERS 内へ移動。隠れたモードは下ドラッグでバーへ追加、バー上ではドラッグ並び替えと上ドラッグによる格納ができ、`AppSettings` へ永続化する。OTHERS は常に残して復帰経路を保証する。
+- **プロファイルドック**: 設定部下の空き領域へフロッピーアイコンだけの保存ボタンと色付きプロファイルボタンを常設。新規／上書き選択、6色、新規名検証、タップ適用、長押しドラッグ並び替え、追加保持による削除確認を提供する。選択状態は3dp白枠も併用して色覚だけに依存しない。
+- **互換性**: Room v3 へ `colorArgb` / `sortOrder` を非null既定値付きで追加する明示 migration を実装。既存 v2 プロファイル、applicationId、minSdk 24、MediaStore 保存先、外部カメラ Intent は維持。
+- **検証**: 単体テスト 28 件、Android lint、debug / 署名 release build。Xperia 1 SOV40 で Pro↔通常12往復、縦横9回、4:3 / 16:9、モード追加・永続・削除、プロファイル新規・色・上書き・削除、静止画、3秒動画を確認。全ストレス中で PID 維持、FATAL / PreviewView 親競合 / bind 失敗なし。
+- versionCode 11 / versionName 2.5.0。英語／日本語リソースは各171キーで一致。
 
 ## v2.4.0 の変更点（Photography Pro 参考のプロUI・GUI安定化）
 
@@ -147,7 +157,7 @@ versionCode 4 / versionName 2.0.0。
 - AndroidX AppCompat の per-app locale（アプリ内言語切替）
 - LifecycleService + フォアグラウンドサービス（バックグラウンド録画）
 - compileSdk 36 / minSdk 24 / targetSdk 36。追加 API は全て SDK_INT でガード。
-- パッケージ: com.oriyu90.fcampro / applicationId 同じ / versionCode 10 / versionName 2.4.0
+- パッケージ: com.oriyu90.fcampro / applicationId 同じ / versionCode 11 / versionName 2.5.0
 
 ## 2. 実装済み機能
 
@@ -162,7 +172,7 @@ versionCode 4 / versionName 2.0.0。
 | マニュアル制御 | ISO / シャッター速度 / フォーカス距離 / WB。各スライダーは選択カメラの CameraCharacteristics の range にクランプ。MANUAL_SENSOR 非対応カメラではマニュアルボタンを無効化 |
 | AE/AF ロック | CONTROL_AE_LOCK。マニュアル露出時は CONTROL_AE_MODE_OFF |
 | タップ AF / ピンチズーム | previewView のジェスチャ → startFocusAndMetering / setZoomRatio。ロック中は無効 |
-| プロファイル | 保存・改名・削除・再適用（Room） |
+| プロファイル | 色付きドックから新規保存・上書き・改名・削除・並び替え・再適用（Room v3） |
 | QR 検出 | ImageAnalysis + ML Kit。1.5 秒デバウンス。URL は「開く」、それ以外はクリップボードにコピー |
 | タイムラプス | 間隔 1/3/5/10 秒（設定）。連続 3 回失敗で自動停止。OTHERS 離脱・画面破棄で停止 |
 | バックグラウンド録画 | BackgroundCameraService（LifecycleService）。通知の STOP で停止。起動中は Activity 側カメラを unbind して排他制御 |
@@ -171,7 +181,7 @@ versionCode 4 / versionName 2.0.0。
 | 設定画面 | 言語、既定アスペクト比、既定タイマー、タイムラプス間隔、シャッター音、バックグラウンド音声、バージョン、開発者サイト等へのリンク |
 | UI | 固定ダークテーマ。エッジトゥエッジ（safeDrawing インセット）。縦画面は縦積み、横画面・幅 600dp 以上は右サイドの縦レール。キャプチャボタンに contentDescription |
 
-## 3. 既知の制約（v2.4.0 時点）
+## 3. 既知の制約（v2.5.0 時点）
 
 - バックグラウンド録画はプロセス生存が前提（画面オフ・アプリバックグラウンドは可）。タスク除去・プロセス終了で停止。完全デタッチの無制限録画は対象外。
 - スローモーションは端末の constrained high-speed video が 60fps 以上の場合に利用でき、保存時に音声を除いて30fps基準へ時間伸長する。パノラマは平行移動推定＋フェザーブレンドのため、強い視差では継ぎ目が出る場合がある。

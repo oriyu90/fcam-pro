@@ -514,7 +514,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     // --- Profiles ------------------------------------------------------------
 
-    fun saveProfile(name: String) {
+    fun saveProfile(name: String, colorArgb: Int = 0xFFFF9F0A.toInt()) {
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
@@ -527,6 +527,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     focusDistance = s.focusDistance,
                     whiteBalanceMode = s.whiteBalanceMode,
                     exposureCompensation = s.exposureCompensation,
+                    colorArgb = colorArgb,
+                    sortOrder = profiles.value.size,
                 )
             )
         }
@@ -540,6 +542,34 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val trimmed = newName.trim()
         if (trimmed.isEmpty()) return
         viewModelScope.launch { repository.update(profile.copy(name = trimmed)) }
+    }
+
+    /** Replaces only photographic values; identity, name, color and order remain stable. */
+    fun overwriteProfile(profile: CameraProfile) {
+        val s = _settings.value
+        viewModelScope.launch {
+            repository.update(
+                profile.copy(
+                    iso = s.iso,
+                    shutterSpeedNs = s.shutterSpeedNs,
+                    focusDistance = s.focusDistance,
+                    whiteBalanceMode = s.whiteBalanceMode,
+                    exposureCompensation = s.exposureCompensation,
+                )
+            )
+        }
+    }
+
+    fun moveProfile(profileId: Int, targetIndex: Int) {
+        val current = profiles.value
+        val from = current.indexOfFirst { it.id == profileId }
+        if (from < 0 || current.isEmpty()) return
+        val to = targetIndex.coerceIn(0, current.lastIndex)
+        if (from == to) return
+        val reordered = current.toMutableList().apply { add(to, removeAt(from)) }
+        viewModelScope.launch {
+            repository.updateAll(reordered.mapIndexed { index, profile -> profile.copy(sortOrder = index) })
+        }
     }
 
     fun loadProfile(profile: CameraProfile) {

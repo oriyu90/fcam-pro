@@ -4,7 +4,9 @@ import android.hardware.camera2.CameraMetadata
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,10 +17,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
@@ -38,7 +41,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -51,9 +58,10 @@ import com.oriyu90.fcampro.R
 import com.oriyu90.fcampro.data.CameraProfile
 import java.util.Locale
 import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 /** Pro settings item selected from the quick-control deck. */
-enum class ProItem { ISO, SHUTTER, FOCUS, WB, EV, FORMAT, MIC, PROFILES }
+enum class ProItem { ISO, SHUTTER, FOCUS, WB, EV, FORMAT, MIC }
 
 private val ProAccent = Color(0xFFFF9F0A)
 private val ProSurface = Color(0xFF171717)
@@ -78,7 +86,6 @@ private fun ProItem.code(): String =
         ProItem.EV -> "EV"
         ProItem.FORMAT -> "FMT"
         ProItem.MIC -> "MIC"
-        ProItem.PROFILES -> "PRF"
     }
 
 private fun ProItem.labelRes(): Int =
@@ -90,7 +97,6 @@ private fun ProItem.labelRes(): Int =
         ProItem.EV -> R.string.label_ev
         ProItem.FORMAT -> R.string.label_save_format
         ProItem.MIC -> R.string.label_mic
-        ProItem.PROFILES -> R.string.profiles_title
     }
 
 private fun ProItem.isModified(s: SharedActions): Boolean =
@@ -101,7 +107,6 @@ private fun ProItem.isModified(s: SharedActions): Boolean =
         ProItem.EV -> s.settings.exposureCompensation != 0
         ProItem.FORMAT -> s.settings.saveFormat != SaveFormat.JPEG
         ProItem.MIC -> s.settings.audioChannels == 2
-        ProItem.PROFILES -> false
     }
 
 private fun proItemsFor(s: SharedActions): List<ProItem> =
@@ -111,7 +116,6 @@ private fun proItemsFor(s: SharedActions): List<ProItem> =
         ProItem.FOCUS,
         ProItem.WB,
         ProItem.EV,
-        ProItem.PROFILES,
         ProItem.FORMAT,
         ProItem.MIC,
     ).filter { item ->
@@ -292,7 +296,6 @@ private fun proItemValue(item: ProItem, s: SharedActions): String {
         ProItem.EV -> ExposureComp.evText(s.settings.exposureCompensation, caps?.exposureCompStep?.takeIf { it > 0f } ?: 1f / 3f).removeSuffix(" EV")
         ProItem.FORMAT -> when (s.settings.saveFormat) { SaveFormat.JPEG -> "JPEG"; SaveFormat.JPEG_RAW -> "J+R"; SaveFormat.RAW -> "RAW" }
         ProItem.MIC -> stringResource(if (s.settings.audioChannels == 2) R.string.mic_stereo else R.string.mic_mono)
-        ProItem.PROFILES -> s.profiles.size.toString()
     }
 }
 
@@ -383,7 +386,6 @@ internal fun ProControlArea(s: SharedActions, active: ProItem?, modifier: Modifi
                 label = { stringResource(if (it == 2) R.string.mic_stereo else R.string.mic_mono) },
                 onSelect = { if (it != s.settings.audioChannels) s.viewModel.cycleAudioChannels() },
             )
-            ProItem.PROFILES -> ProProfilesBlock(s)
         }
     }
 }
@@ -427,55 +429,132 @@ private fun wbLabel(mode: Int?): String =
         }
     )
 
-@Composable
-private fun ProProfilesBlock(s: SharedActions) {
-    var showSave by remember { mutableStateOf(false) }
-    var editProfile by remember { mutableStateOf<CameraProfile?>(null) }
-    var deleteProfile by remember { mutableStateOf<CameraProfile?>(null) }
-    var saved by remember { mutableStateOf(false) }
+private val ProfileColors =
+    listOf(0xFFFF9F0A, 0xFFE05A47, 0xFF4FA3D1, 0xFF55A56D, 0xFFC57AD8, 0xFFE0C34F)
+        .map { it.toInt() }
 
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(if (s.profiles.isEmpty()) stringResource(R.string.profiles_empty) else stringResource(R.string.profile_count, s.profiles.size), color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.bodySmall)
-        Button(onClick = { showSave = true; saved = false }) { Text(stringResource(R.string.save_profile)) }
-    }
-    if (saved) Text(stringResource(R.string.profile_saved), color = ProAccent, style = MaterialTheme.typography.labelMedium)
-    s.profiles.forEach { profile ->
-        val matches = profile.matches(s.settings)
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
-                .background(if (matches) ProSelectedSurface else ProSurface, RoundedCornerShape(8.dp))
-                .border(1.dp, if (matches) ProAccent else ProBoundary, RoundedCornerShape(8.dp))
-                .clickable { s.viewModel.loadProfile(profile) }
-                .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
+/** Always-visible profile dock below the selected Pro setting. */
+@Composable
+internal fun ProProfileDock(s: SharedActions, modifier: Modifier = Modifier) {
+    var chooseSave by remember { mutableStateOf(false) }
+    var createNew by remember { mutableStateOf(false) }
+    var chooseOverwrite by remember { mutableStateOf(false) }
+    var deleteProfile by remember { mutableStateOf<CameraProfile?>(null) }
+    var editProfile by remember { mutableStateOf<CameraProfile?>(null) }
+
+    Row(
+        modifier = modifier.fillMaxWidth().height(66.dp).background(Color.Black).padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            Modifier.size(54.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(ProSurface, RoundedCornerShape(10.dp))
+                .border(1.dp, ProBoundary, RoundedCornerShape(10.dp))
+                .clickable { chooseSave = true },
+            contentAlignment = Alignment.Center,
         ) {
-            if (matches) Icon(Icons.Default.Check, stringResource(R.string.profile_applied), tint = ProAccent, modifier = Modifier.size(18.dp))
-            Text(profile.name, modifier = Modifier.weight(1f).padding(start = if (matches) 8.dp else 0.dp), color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            IconButton(onClick = { editProfile = profile }) { Icon(Icons.Default.Edit, stringResource(R.string.action_edit), modifier = Modifier.size(18.dp)) }
-            IconButton(onClick = { deleteProfile = profile }) { Icon(Icons.Default.Close, stringResource(R.string.action_delete), modifier = Modifier.size(18.dp)) }
+            Icon(Icons.Default.Save, stringResource(R.string.profile_save_or_overwrite), tint = ProAccent)
+        }
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
+            items(s.profiles, key = { it.id }) { profile ->
+                val index = s.profiles.indexOfFirst { it.id == profile.id }
+                ProfileDockButton(
+                    profile = profile,
+                    selected = profile.matches(s.settings),
+                    index = index,
+                    count = s.profiles.size,
+                    onClick = { s.viewModel.loadProfile(profile) },
+                    onMove = { target -> s.viewModel.moveProfile(profile.id, target) },
+                    onDelete = { deleteProfile = profile },
+                )
+            }
         }
     }
 
-    if (showSave) {
-        var name by remember { mutableStateOf("") }
+    if (chooseSave) {
         AlertDialog(
-            onDismissRequest = { showSave = false },
-            title = { Text(stringResource(R.string.save_profile)) },
-            text = {
-                TextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text(stringResource(R.string.profile_name)) },
-                    supportingText = if (name.isBlank()) ({ Text(stringResource(R.string.profile_name_required)) }) else null,
-                    singleLine = true,
-                )
-            },
+            onDismissRequest = { chooseSave = false },
+            title = { Text(stringResource(R.string.profile_save_or_overwrite)) },
+            text = { Text(stringResource(R.string.profile_save_choice_hint)) },
             confirmButton = {
-                Button(enabled = name.isNotBlank(), onClick = { s.viewModel.saveProfile(name); saved = true; showSave = false }) {
-                    Text(stringResource(R.string.action_save))
+                Button(onClick = { chooseSave = false; createNew = true }) {
+                    Text(stringResource(R.string.profile_create_new))
                 }
             },
-            dismissButton = { TextButton(onClick = { showSave = false }) { Text(stringResource(R.string.action_cancel)) } },
+            dismissButton = {
+                TextButton(
+                    enabled = s.profiles.isNotEmpty(),
+                    onClick = { chooseSave = false; chooseOverwrite = true },
+                ) { Text(stringResource(R.string.profile_overwrite)) }
+            },
+        )
+    }
+    if (createNew) {
+        var name by remember { mutableStateOf("") }
+        var color by remember { mutableStateOf(ProfileColors.first()) }
+        AlertDialog(
+            onDismissRequest = { createNew = false },
+            title = { Text(stringResource(R.string.profile_create_new)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text(stringResource(R.string.profile_name)) },
+                        supportingText = if (name.isBlank()) ({ Text(stringResource(R.string.profile_name_required)) }) else null,
+                        singleLine = true,
+                    )
+                    Text(stringResource(R.string.profile_color), style = MaterialTheme.typography.labelLarge)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        items(ProfileColors.size) { index ->
+                            val swatch = ProfileColors[index]
+                            val colorOptionDescription = stringResource(R.string.profile_color_option, index + 1)
+                            Box(
+                                Modifier.size(38.dp)
+                                    .background(Color(swatch), CircleShape)
+                                    .border(if (swatch == color) 3.dp else 1.dp, if (swatch == color) Color.White else ProBoundary, CircleShape)
+                                    .clickable { color = swatch }
+                                    .semantics { contentDescription = colorOptionDescription },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (swatch == color) Icon(Icons.Default.Check, null, Modifier.size(18.dp), tint = Color.Black)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(enabled = name.isNotBlank(), onClick = {
+                    s.viewModel.saveProfile(name, color)
+                    createNew = false
+                }) { Text(stringResource(R.string.action_save)) }
+            },
+            dismissButton = { TextButton(onClick = { createNew = false }) { Text(stringResource(R.string.action_cancel)) } },
+        )
+    }
+    if (chooseOverwrite) {
+        AlertDialog(
+            onDismissRequest = { chooseOverwrite = false },
+            title = { Text(stringResource(R.string.profile_overwrite)) },
+            text = {
+                Column {
+                    s.profiles.forEach { profile ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(
+                                onClick = { s.viewModel.overwriteProfile(profile); chooseOverwrite = false },
+                                modifier = Modifier.weight(1f),
+                            ) { Text(profile.name, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Start) }
+                            IconButton(onClick = { chooseOverwrite = false; editProfile = profile }) {
+                                Icon(Icons.Default.Edit, stringResource(R.string.action_edit))
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { chooseOverwrite = false }) { Text(stringResource(R.string.action_cancel)) } },
         )
     }
     editProfile?.let { profile ->
@@ -485,9 +564,10 @@ private fun ProProfilesBlock(s: SharedActions) {
             title = { Text(stringResource(R.string.edit_profile_title)) },
             text = { TextField(value = name, onValueChange = { name = it }, singleLine = true) },
             confirmButton = {
-                Button(enabled = name.isNotBlank(), onClick = { s.viewModel.updateProfileName(profile, name); editProfile = null }) {
-                    Text(stringResource(R.string.action_update))
-                }
+                Button(enabled = name.isNotBlank(), onClick = {
+                    s.viewModel.updateProfileName(profile, name)
+                    editProfile = null
+                }) { Text(stringResource(R.string.action_update)) }
             },
             dismissButton = { TextButton(onClick = { editProfile = null }) { Text(stringResource(R.string.action_cancel)) } },
         )
@@ -499,6 +579,71 @@ private fun ProProfilesBlock(s: SharedActions) {
             text = { Text(stringResource(R.string.delete_profile_message, profile.name)) },
             confirmButton = { Button(onClick = { s.viewModel.deleteProfile(profile.id); deleteProfile = null }) { Text(stringResource(R.string.action_delete)) } },
             dismissButton = { TextButton(onClick = { deleteProfile = null }) { Text(stringResource(R.string.action_cancel)) } },
+        )
+    }
+}
+
+@Composable
+private fun ProfileDockButton(
+    profile: CameraProfile,
+    selected: Boolean,
+    index: Int,
+    count: Int,
+    onClick: () -> Unit,
+    onMove: (Int) -> Unit,
+    onDelete: () -> Unit,
+) {
+    var dragX by remember(profile.id) { mutableStateOf(0f) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val slot = with(density) { 62.dp.toPx() }
+    val movementThreshold = with(density) { 8.dp.toPx() }
+    Box(
+        modifier =
+            Modifier.size(54.dp)
+                .graphicsLayer { translationX = dragX; alpha = if (dragX == 0f) 1f else 0.8f }
+                .pointerInput(profile.id, index, count) {
+                    kotlinx.coroutines.coroutineScope {
+                        var deleteJob: kotlinx.coroutines.Job? = null
+                        var moved = false
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = {
+                                moved = false
+                                deleteJob = launch {
+                                    kotlinx.coroutines.delay(900)
+                                    if (!moved) onDelete()
+                                }
+                            },
+                            onDrag = { change, amount ->
+                                change.consume()
+                                dragX += amount.x
+                                if (kotlin.math.abs(dragX) > movementThreshold) {
+                                    moved = true
+                                    deleteJob?.cancel()
+                                }
+                            },
+                            onDragCancel = { deleteJob?.cancel(); dragX = 0f },
+                            onDragEnd = {
+                                deleteJob?.cancel()
+                                if (moved && count > 1) {
+                                    onMove((index + (dragX / slot).roundToInt()).coerceIn(0, count - 1))
+                                }
+                                dragX = 0f
+                            },
+                        )
+                    }
+                }
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(profile.colorArgb), RoundedCornerShape(10.dp))
+                .border(if (selected) 3.dp else 1.dp, if (selected) Color.White else ProBoundary, RoundedCornerShape(10.dp))
+                .clickable(onClick = onClick)
+                .semantics { contentDescription = profile.name },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            profile.name.trim().take(1).uppercase(Locale.getDefault()).ifEmpty { "P" },
+            color = if (Color(profile.colorArgb).luminance() > 0.45f) Color.Black else Color.White,
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.titleMedium,
         )
     }
 }

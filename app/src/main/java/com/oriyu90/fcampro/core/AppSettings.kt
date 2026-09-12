@@ -24,6 +24,8 @@ class AppSettings private constructor(private val prefs: SharedPreferences) {
         val gridLines: Boolean,
         val panelCollapsed: Boolean,
         val panelGravity: Int, // 0 = top, 1 = center, 2 = bottom
+        /** Ordered CameraMode names shown in the primary mode bar. */
+        val modeBar: List<String>,
     )
 
     private val _state = MutableStateFlow(readSnapshot())
@@ -41,6 +43,12 @@ class AppSettings private constructor(private val prefs: SharedPreferences) {
             gridLines = prefs.getBoolean(KEY_GRID, false),
             panelCollapsed = prefs.getBoolean(KEY_PANEL_COLLAPSED, false),
             panelGravity = prefs.getInt(KEY_PANEL_GRAVITY, 2).coerceIn(0, 2),
+            modeBar =
+                prefs.getString(KEY_MODE_BAR, null)
+                    ?.split(',')
+                    ?.map(String::trim)
+                    ?.filter(String::isNotEmpty)
+                    ?: DEFAULT_MODE_BAR,
         )
 
     private fun mutate(block: SharedPreferences.Editor.() -> Unit) {
@@ -85,9 +93,14 @@ class AppSettings private constructor(private val prefs: SharedPreferences) {
         get() = _state.value.panelGravity
         set(value) = mutate { putInt(KEY_PANEL_GRAVITY, value.coerceIn(0, 2)) }
 
+    var modeBar: List<String>
+        get() = _state.value.modeBar
+        set(value) = mutate { putString(KEY_MODE_BAR, value.joinToString(",")) }
+
     companion object {
         val TIMELAPSE_INTERVALS = listOf(1, 3, 5, 10)
         val TIMER_OPTIONS = listOf(0, 3, 10)
+        val DEFAULT_MODE_BAR = listOf("PHOTO", "VIDEO", "OTHERS")
 
         private const val PREFS = "fcam_settings"
         private const val KEY_LANG = "language_tag"
@@ -99,6 +112,7 @@ class AppSettings private constructor(private val prefs: SharedPreferences) {
         private const val KEY_GRID = "grid_lines"
         private const val KEY_PANEL_COLLAPSED = "panel_collapsed"
         private const val KEY_PANEL_GRAVITY = "panel_gravity"
+        private const val KEY_MODE_BAR = "mode_bar"
 
         @Volatile private var instance: AppSettings? = null
 

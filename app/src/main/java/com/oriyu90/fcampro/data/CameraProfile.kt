@@ -14,5 +14,9 @@ data class CameraProfile(
     // AE exposure-compensation index (0 = neutral). v1 -> v2 migration adds
     // this column with DEFAULT 0, so existing rows survive the upgrade.
     val exposureCompensation: Int = 0,
+    /** User-selected ARGB swatch. Existing profiles migrate to Pro orange. */
+    val colorArgb: Int = 0xFFFF9F0A.toInt(),
+    /** Stable user-defined order in the Pro profile dock. */
+    val sortOrder: Int = 0,
     val timestamp: Long = System.currentTimeMillis(),
 )

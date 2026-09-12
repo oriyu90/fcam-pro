@@ -79,6 +79,13 @@
     <string name="profiles_empty">プロファイルはまだありません</string>
     <string name="profile_name_required">プロファイル名を入力してください</string>
     <string name="profile_applied">適用中のプロファイル</string>
+    <string name="profile_save_or_overwrite">プロファイルの保存・上書き</string>
+    <string name="profile_save_choice_hint">色付きの新規プロファイルを作成するか、現在の設定で既存プロファイルを上書きします。</string>
+    <string name="profile_create_new">新規追加</string>
+    <string name="profile_overwrite">上書き</string>
+    <string name="profile_color">プロファイルの色</string>
+    <string name="profile_color_option">プロファイルの色候補%1$d</string>
+    <string name="mode_drag_hint">モードを下へドラッグするとバーに追加できます。バーから上へドラッグするとここへ戻せます。</string>
     <string name="delete_profile_title">プロファイルを削除しますか？</string>
     <string name="delete_profile_message">「%1$s」を削除します。この操作は元に戻せません。</string>
 

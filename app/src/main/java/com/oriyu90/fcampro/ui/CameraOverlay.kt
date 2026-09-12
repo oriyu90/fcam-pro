@@ -59,6 +59,7 @@ import androidx.compose.material.icons.filled.Timelapse
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.UnfoldMore
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -75,6 +76,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -116,6 +118,8 @@ fun CameraOverlay(
     onResetZoom: () -> Unit,
     panelCollapsed: Boolean,
     panelGravity: Int,
+    modeBar: List<CameraMode>,
+    onSetModeBar: (List<CameraMode>) -> Unit,
     onSetPanelCollapsed: (Boolean) -> Unit,
     onSetPanelGravity: (Int) -> Unit,
     onToggleGrid: () -> Unit,
@@ -186,6 +190,8 @@ fun CameraOverlay(
             onCancelPanorama = onCancelPanorama,
             onToggleBackground = onToggleBackground,
             onOpenSettings = onOpenSettings,
+            modeBar = modeBar,
+            onSetModeBar = onSetModeBar,
         )
 
     // Pro (manual) mode is composed by CameraScreen (ProScreen layouts);
@@ -248,6 +254,8 @@ internal class SharedActions(
     val onCancelPanorama: () -> Unit,
     val onToggleBackground: () -> Unit,
     val onOpenSettings: () -> Unit,
+    val modeBar: List<CameraMode>,
+    val onSetModeBar: (List<CameraMode>) -> Unit,
 ) {
     /** Central shutter dispatch shared by every layout. */
     fun onShutter() {
@@ -389,18 +397,8 @@ internal fun IphoneModeTabs(s: SharedActions) {
         horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        items(MODES, key = { it.first }) { (mode, res) ->
-            val selected = s.settings.cameraMode == mode
-            Text(
-                stringResource(res),
-                color = if (selected) Color.White else Color.White.copy(alpha = 0.55f),
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                maxLines = 1,
-                modifier = Modifier.clickable {
-                    s.viewModel.setMode(mode)
-                }.padding(vertical = 6.dp),
-            )
+        items(s.modeBar, key = { it.name }) { mode ->
+            DraggableModeTab(s, mode, vertical = false)
         }
     }
 }
@@ -934,14 +932,29 @@ private fun LensRow(
 
 // ============================ MODE TABS ============================
 
-private val MODES =
-    listOf(
-        CameraMode.PHOTO to R.string.tab_photo,
-        CameraMode.VIDEO to R.string.tab_video,
-        CameraMode.SLOWMO to R.string.tab_slowmo,
-        CameraMode.PANORAMA to R.string.tab_panorama,
-        CameraMode.OTHERS to R.string.tab_others,
-    )
+internal object ModeBarOrder {
+    val default = listOf(CameraMode.PHOTO, CameraMode.VIDEO, CameraMode.OTHERS)
+
+    fun sanitize(raw: List<CameraMode>): List<CameraMode> =
+        if (raw.isEmpty()) default
+        else raw.filter { it != CameraMode.OTHERS }.distinct() + CameraMode.OTHERS
+
+    fun add(current: List<CameraMode>, mode: CameraMode): List<CameraMode> =
+        sanitize(current.filter { it != CameraMode.OTHERS } + mode + CameraMode.OTHERS)
+
+    fun remove(current: List<CameraMode>, mode: CameraMode): List<CameraMode> =
+        if (mode == CameraMode.OTHERS) sanitize(current)
+        else sanitize(current.filter { it != mode })
+
+    fun move(current: List<CameraMode>, mode: CameraMode, target: Int): List<CameraMode> {
+        if (mode == CameraMode.OTHERS) return sanitize(current)
+        val movable = sanitize(current).filter { it != CameraMode.OTHERS }.toMutableList()
+        val from = movable.indexOf(mode)
+        if (from < 0) return sanitize(current)
+        movable.add(target.coerceIn(0, movable.lastIndex), movable.removeAt(from))
+        return movable + CameraMode.OTHERS
+    }
+}
 
 @Composable
 private fun ModeTabsRow(s: SharedActions) {
@@ -949,7 +962,7 @@ private fun ModeTabsRow(s: SharedActions) {
         Modifier.fillMaxWidth().padding(top = 12.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
     ) {
-        MODES.forEach { (mode, res) -> ModeTab(s, mode, res) }
+        s.modeBar.forEach { mode -> DraggableModeTab(s, mode, vertical = false) }
     }
 }
 
@@ -960,27 +973,100 @@ private fun ModeTabsColumn(s: SharedActions) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        MODES.forEach { (mode, res) -> ModeTab(s, mode, res) }
+        s.modeBar.forEach { mode -> DraggableModeTab(s, mode, vertical = true) }
     }
 }
 
 @Composable
-internal fun ModeTab(s: SharedActions, mode: CameraMode, res: Int) {
+private fun DraggableModeTab(s: SharedActions, mode: CameraMode, vertical: Boolean) {
+    var dragX by remember(mode) { mutableStateOf(0f) }
+    var dragY by remember(mode) { mutableStateOf(0f) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val removeThreshold = with(density) { 38.dp.toPx() }
+    val slot = with(density) { if (vertical) 52.dp.toPx() else 92.dp.toPx() }
     val selected = s.settings.cameraMode == mode
-    TextButton(onClick = { s.viewModel.setMode(mode) }) {
+    Column(
+        modifier =
+            Modifier.graphicsLayer {
+                    translationX = dragX
+                    translationY = dragY
+                    alpha = if (dragX != 0f || dragY != 0f) 0.78f else 1f
+                }
+                .pointerInput(mode, s.modeBar) {
+                    detectDragGestures(
+                        onDrag = { change, amount ->
+                            change.consume()
+                            dragX += amount.x
+                            dragY += amount.y
+                        },
+                        onDragCancel = { dragX = 0f; dragY = 0f },
+                        onDragEnd = {
+                            if (mode != CameraMode.OTHERS && dragY < -removeThreshold) {
+                                s.onSetModeBar(ModeBarOrder.remove(s.modeBar, mode))
+                            } else {
+                                val axis = if (vertical) dragY else dragX
+                                val from = s.modeBar.indexOf(mode)
+                                if (from >= 0 && kotlin.math.abs(axis) > slot / 2f) {
+                                    s.onSetModeBar(
+                                        ModeBarOrder.move(
+                                            s.modeBar,
+                                            mode,
+                                            from + (axis / slot).roundToInt(),
+                                        )
+                                    )
+                                }
+                            }
+                            dragX = 0f
+                            dragY = 0f
+                        },
+                    )
+                }
+                .heightIn(min = 48.dp)
+                .clickable { s.viewModel.setMode(mode) }
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(
+            imageVector = modeIcon(mode),
+            contentDescription = stringResource(modeTabRes(mode)),
+            tint = if (selected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.7f),
+            modifier = Modifier.size(18.dp),
+        )
         Text(
-            stringResource(res),
-            color = if (selected) MaterialTheme.colorScheme.primary else Color.White,
+            stringResource(modeTabRes(mode)),
+            color = if (selected) Color.White else Color.White.copy(alpha = 0.55f),
+            style = MaterialTheme.typography.labelSmall,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+            maxLines = 1,
         )
     }
 }
+
+private fun modeIcon(mode: CameraMode): ImageVector =
+    when (mode) {
+        CameraMode.PHOTO -> Icons.Default.PhotoLibrary
+        CameraMode.VIDEO -> Icons.Default.Videocam
+        CameraMode.SLOWMO -> Icons.Default.SlowMotionVideo
+        CameraMode.PANORAMA -> Icons.Default.PanoramaHorizontal
+        CameraMode.OTHERS -> Icons.Default.UnfoldMore
+    }
 
 // ============================ OTHERS MENU ============================
 
 @Composable
 private fun OthersMenu(s: SharedActions, twoPerRow: Boolean) {
     val items = buildList<@Composable () -> Unit> {
+        CameraMode.entries
+            .filter { it != CameraMode.OTHERS && it !in s.modeBar }
+            .forEach { mode ->
+                add {
+                    DraggableOtherMode(
+                        mode = mode,
+                        onClick = { s.viewModel.setMode(mode) },
+                        onAdd = { s.onSetModeBar(ModeBarOrder.add(s.modeBar, mode)) },
+                    )
+                }
+            }
         add {
             OthersMenuItem(
                 Icons.Default.Timelapse,
@@ -993,20 +1079,6 @@ private fun OthersMenu(s: SharedActions, twoPerRow: Boolean) {
         }
         add {
             OthersMenuItem(
-                Icons.Default.SlowMotionVideo,
-                stringResource(R.string.others_slowmo),
-                onClick = { s.viewModel.setMode(CameraMode.SLOWMO) },
-            )
-        }
-        add {
-            OthersMenuItem(
-                Icons.Default.PanoramaHorizontal,
-                stringResource(R.string.others_panorama),
-                onClick = { s.viewModel.setMode(CameraMode.PANORAMA) },
-            )
-        }
-        add {
-            OthersMenuItem(
                 Icons.Default.Security,
                 stringResource(
                     if (s.bgRunning) R.string.others_bg_record_stop else R.string.others_bg_record
@@ -1015,28 +1087,66 @@ private fun OthersMenu(s: SharedActions, twoPerRow: Boolean) {
             )
         }
     }
-    if (!twoPerRow) {
-        LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-        ) {
-            items.forEach { item { it() } }
-        }
-    } else {
-        Column(
-            Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            items.chunked(2).forEach { row ->
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                ) {
-                    row.forEach { it() }
-                    if (row.size < 2) Spacer(Modifier.size(56.dp))
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            stringResource(R.string.mode_drag_hint),
+            color = Color.White.copy(alpha = 0.68f),
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+        if (!twoPerRow) {
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+            ) {
+                items.forEach { item { it() } }
+            }
+        } else {
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                items.chunked(2).forEach { row ->
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                    ) {
+                        row.forEach { it() }
+                        if (row.size < 2) Spacer(Modifier.size(56.dp))
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun DraggableOtherMode(mode: CameraMode, onClick: () -> Unit, onAdd: () -> Unit) {
+    var dragY by remember(mode) { mutableStateOf(0f) }
+    val threshold = with(androidx.compose.ui.platform.LocalDensity.current) { 38.dp.toPx() }
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier =
+            Modifier.graphicsLayer { translationY = dragY }
+                .pointerInput(mode) {
+                    detectDragGestures(
+                        onDrag = { change, amount -> change.consume(); dragY += amount.y },
+                        onDragCancel = { dragY = 0f },
+                        onDragEnd = { if (dragY > threshold) onAdd(); dragY = 0f },
+                    )
+                }
+                .heightIn(min = 58.dp)
+                .clickable(onClick = onClick)
+                .padding(8.dp),
+    ) {
+        Box(
+            modifier = Modifier.size(52.dp).clip(CircleShape).background(Color.DarkGray),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(modeIcon(mode), contentDescription = stringResource(modeTabRes(mode)), tint = Color.White)
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(stringResource(modeTabRes(mode)), color = Color.White, style = MaterialTheme.typography.labelSmall)
     }
 }
 
