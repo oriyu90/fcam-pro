@@ -107,6 +107,10 @@ private enum class Layout { PHONE_PORTRAIT, LARGE_PORTRAIT, SIDE }
 internal fun normalPhoneUsesExpandedPreview(mode: CameraMode): Boolean =
     mode != CameraMode.OTHERS && mode != CameraMode.PANORAMA
 
+/** Keeps the normal landscape deck compact while preserving 48dp controls. */
+internal fun normalLandscapePanelWidth(screenWidthDp: Int): Int =
+    (screenWidthDp * 0.34f).roundToInt().coerceIn(272, 292)
+
 @Composable
 fun CameraOverlay(
     viewModel: CameraViewModel,
@@ -357,9 +361,9 @@ private fun PhonePortrait(
 }
 
 /**
- * Sony-style landscape/tablet composition. The viewfinder and control deck are
- * siblings, so neither can cover or displace the other and the full remainder
- * beside the immutable-aspect preview is useful control space.
+ * Sony-style landscape/tablet composition. The normal landscape rail is width-
+ * bounded and non-scrolling, leaving the remainder to an immersive viewfinder.
+ * Large portrait keeps the exact-aspect sibling layout used before v2.5.3.
  */
 @Composable
 private fun NormalSideLayout(
@@ -370,33 +374,65 @@ private fun NormalSideLayout(
     onSetCollapsed: (Boolean) -> Unit,
     previewContent: @Composable () -> Unit,
 ) {
+    val compactLandscape = !panelOnLeft
+    val compactPanelWidth =
+        normalLandscapePanelWidth(LocalConfiguration.current.screenWidthDp).dp
+
     @Composable
-    fun Preview() {
+    fun androidx.compose.foundation.layout.RowScope.Preview() {
         Box(
-            Modifier.fillMaxHeight()
-                .aspectRatio(streamAspect, matchHeightConstraintsFirst = true)
+            (if (compactLandscape) {
+                Modifier.weight(1f).fillMaxHeight()
+            } else {
+                Modifier.fillMaxHeight()
+                    .aspectRatio(streamAspect, matchHeightConstraintsFirst = true)
+            })
                 .background(Color.Black),
         ) { previewContent() }
     }
 
     @Composable
     fun androidx.compose.foundation.layout.RowScope.Deck() {
-        Column(
-            Modifier.weight(1f).fillMaxHeight()
-                .background(Color.Black)
-                .verticalScroll(rememberScrollState())
-                .padding(6.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            ControlIcons(s = s, columns = 3)
-            PanelBody(s = s, verticalTabs = false, othersTwoPerRow = true)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                ControlTile(onClick = { onSetCollapsed(true) }) {
-                    Icon(
-                        if (panelOnLeft) Icons.Default.ChevronLeft else Icons.Default.ChevronRight,
-                        contentDescription = stringResource(R.string.cd_panel_close),
-                        tint = Color.White,
-                    )
+        if (compactLandscape) {
+            Column(
+                Modifier.width(compactPanelWidth).fillMaxHeight()
+                    .background(Color.Black)
+                    .padding(6.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
+            ) {
+                ControlIcons(
+                    s = s,
+                    columns = 4,
+                    trailing = {
+                        ControlTile(onClick = { onSetCollapsed(true) }) {
+                            Icon(
+                                Icons.Default.ChevronRight,
+                                contentDescription = stringResource(R.string.cd_panel_close),
+                                tint = Color.White,
+                            )
+                        }
+                    },
+                )
+                LandscapePanelBody(s)
+            }
+        } else {
+            Column(
+                Modifier.weight(1f).fillMaxHeight()
+                    .background(Color.Black)
+                    .verticalScroll(rememberScrollState())
+                    .padding(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                ControlIcons(s = s, columns = 3)
+                PanelBody(s = s, verticalTabs = false, othersTwoPerRow = true)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    ControlTile(onClick = { onSetCollapsed(true) }) {
+                        Icon(
+                            Icons.Default.ChevronLeft,
+                            contentDescription = stringResource(R.string.cd_panel_close),
+                            tint = Color.White,
+                        )
+                    }
                 }
             }
         }
@@ -405,9 +441,12 @@ private fun NormalSideLayout(
     if (collapsed) {
         Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
             Box(
-                Modifier.fillMaxHeight()
-                    .aspectRatio(streamAspect, matchHeightConstraintsFirst = true)
-                    .align(Alignment.Center),
+                (if (compactLandscape) {
+                    Modifier.fillMaxSize()
+                } else {
+                    Modifier.fillMaxHeight()
+                        .aspectRatio(streamAspect, matchHeightConstraintsFirst = true)
+                }).align(Alignment.Center),
             ) { previewContent() }
             CollapsedCluster(
                 s = s,
@@ -422,6 +461,45 @@ private fun NormalSideLayout(
             if (!panelOnLeft) Deck()
         }
     }
+}
+
+/** Dense, non-scrolling controls used only by the normal landscape rail. */
+@Composable
+private fun LandscapePanelBody(s: SharedActions) {
+    val lenses = s.availableLenses.filter { it.isFront == s.settings.isFrontCamera }
+    if (lenses.size > 1) {
+        LensZoomPills(
+            lenses = lenses,
+            current = s.settings.currentLens,
+            enabled = !s.isRecording && !s.bgRunning,
+            onSelect = { s.viewModel.setLens(it) },
+        )
+    }
+
+    when (s.settings.cameraMode) {
+        CameraMode.OTHERS -> OthersMenu(s = s, twoPerRow = false, compactRow = true)
+        CameraMode.PANORAMA -> PanoProgressRow(s)
+        else -> {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                MediaThumbButton(s.mediaThumb, s.hasMedia, s.onOpenGallery, size = 48.dp)
+                FrontBackButton(s)
+                ShutterButton(
+                    isVideo = s.isRecordMode(),
+                    isRecording = s.isRecording,
+                    isCapturing = s.isCapturing,
+                    enabled = !s.bgRunning,
+                    onClick = { s.onShutter() },
+                )
+                BatteryPill(s.batteryPct)
+            }
+        }
+    }
+
+    ModeTabsRow(s, topPadding = 0.dp)
 }
 
 /** PHOTO / VIDEO VAL still-photo modes share the manual panel. */
@@ -706,7 +784,12 @@ private fun ControlTile(
 }
 
 @Composable
-internal fun ControlIcons(s: SharedActions, columns: Int, modifier: Modifier = Modifier) {
+internal fun ControlIcons(
+    s: SharedActions,
+    columns: Int,
+    trailing: (@Composable () -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
     val photoOrVideo = isStillMode(s.settings.cameraMode)
     val caps = s.settings.currentLens?.capabilities
 
@@ -808,6 +891,7 @@ internal fun ControlIcons(s: SharedActions, columns: Int, modifier: Modifier = M
                 )
             }
         }
+        if (trailing != null) add(trailing)
     }
 
     if (columns <= 1) {
@@ -1023,9 +1107,9 @@ internal object ModeBarOrder {
 }
 
 @Composable
-private fun ModeTabsRow(s: SharedActions) {
+private fun ModeTabsRow(s: SharedActions, topPadding: Dp = 12.dp) {
     Row(
-        Modifier.fillMaxWidth().padding(top = 12.dp),
+        Modifier.fillMaxWidth().padding(top = topPadding),
         horizontalArrangement = Arrangement.SpaceEvenly,
     ) {
         s.modeBar.forEach { mode -> DraggableModeTab(s, mode, vertical = false) }
@@ -1128,7 +1212,11 @@ private fun modeIcon(mode: CameraMode): ImageVector =
 // ============================ OTHERS MENU ============================
 
 @Composable
-private fun OthersMenu(s: SharedActions, twoPerRow: Boolean) {
+private fun OthersMenu(
+    s: SharedActions,
+    twoPerRow: Boolean,
+    compactRow: Boolean = false,
+) {
     val items = buildList<@Composable () -> Unit> {
         CameraMode.entries
             .filter { it != CameraMode.OTHERS && it !in s.modeBar }
@@ -1167,8 +1255,18 @@ private fun OthersMenu(s: SharedActions, twoPerRow: Boolean) {
             color = Color.White.copy(alpha = 0.68f),
             style = MaterialTheme.typography.labelSmall,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            maxLines = if (compactRow) 1 else Int.MAX_VALUE,
+            overflow = TextOverflow.Ellipsis,
         )
-        if (!twoPerRow) {
+        if (compactRow) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.Top,
+            ) {
+                items.forEach { it() }
+            }
+        } else if (!twoPerRow) {
             LazyRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
@@ -1232,7 +1330,10 @@ private fun DraggableOtherMode(mode: CameraMode, onClick: () -> Unit, onAdd: () 
 private fun OthersMenuItem(icon: ImageVector, text: String, onClick: () -> Unit) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clickable(onClick = onClick).padding(8.dp),
+        modifier =
+            Modifier.clickable(onClick = onClick)
+                .semantics(mergeDescendants = true) { contentDescription = text }
+                .padding(8.dp),
     ) {
         Box(
             modifier =

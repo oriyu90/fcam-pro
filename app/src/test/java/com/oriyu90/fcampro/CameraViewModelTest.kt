@@ -23,6 +23,7 @@ import com.oriyu90.fcampro.ui.SaveFormat
 import com.oriyu90.fcampro.ui.ZoomRatios
 import com.oriyu90.fcampro.ui.dedupeLenses
 import com.oriyu90.fcampro.ui.formatStorageGb
+import com.oriyu90.fcampro.ui.normalLandscapePanelWidth
 import com.oriyu90.fcampro.ui.normalPhoneUsesExpandedPreview
 import com.oriyu90.fcampro.ui.proArrangement
 import org.junit.Assert.assertEquals
@@ -40,6 +41,13 @@ class CameraViewModelTest {
         assertTrue(normalPhoneUsesExpandedPreview(CameraMode.SLOWMO))
         assertTrue(!normalPhoneUsesExpandedPreview(CameraMode.OTHERS))
         assertTrue(!normalPhoneUsesExpandedPreview(CameraMode.PANORAMA))
+    }
+
+    @Test
+    fun normalLandscapePanelStaysWithinCompactAccessibleBounds() {
+        assertEquals(272, normalLandscapePanelWidth(600))
+        assertEquals(289, normalLandscapePanelWidth(850))
+        assertEquals(292, normalLandscapePanelWidth(1_200))
     }
 
     private fun vm() =

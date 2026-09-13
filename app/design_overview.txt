@@ -1,4 +1,12 @@
-# Fcam pro — 設計概要と実装状況（v2.5.2）
+# Fcam pro — 設計概要と実装状況（v2.5.3）
+
+## v2.5.3 の変更点（通常横画面の高密度レール・全面プレビュー）
+
+- **幅の上限**: 通常横画面の操作レールを画面幅の34%を基準に272〜292dpへ制限。従来の「4:3／16:9プレビューを高さ基準で固定し、余りを全てパネルへ渡す」構成を廃止した。
+- **プレビュー優先**: 展開時はレール以外の全幅、折り畳み時は全画面をプレビューへ割り当て、`FILL_CENTER`で中央クロップする。CameraXの出力アスペクト設定は変更しない。
+- **スクロール撤廃**: 48dp操作を4列グリッド、レンズ倍率、撮影操作、モードバーへ整理。「その他」は最大4項目を1行表示し、低い横画面でも縦スクロールを不要にした。
+- **非対象の保護**: ProScreenとProの配置判定には変更なし。大画面縦レイアウトも既存の正確なアスペクト枠とスクロール可能パネルを維持。
+- versionCode 14 / versionName 2.5.3。Xperia 1で通常／その他／折り畳み、通常↔Pro、縦横回転を確認。30テスト、Lint、正式鍵署名Releaseが成功。
 
 ## v2.5.2 の変更点（通常モードの没入型縦プレビュー）
 
@@ -173,7 +181,7 @@ versionCode 4 / versionName 2.0.0。
 - AndroidX AppCompat の per-app locale（アプリ内言語切替）
 - LifecycleService + フォアグラウンドサービス（バックグラウンド録画）
 - compileSdk 36 / minSdk 24 / targetSdk 36。追加 API は全て SDK_INT でガード。
-- パッケージ: com.oriyu90.fcampro / applicationId 同じ / versionCode 13 / versionName 2.5.2
+- パッケージ: com.oriyu90.fcampro / applicationId 同じ / versionCode 14 / versionName 2.5.3
 
 ## 2. 実装済み機能
 
