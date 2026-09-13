@@ -81,10 +81,11 @@ app/src/main/java/com/oriyu90/fcampro/
     └── theme/               # fixed dark Material 3 theme
 ```
 
-## Known limitations (v2.5.0)
+## Known limitations (v2.5.1)
 
-- Background recording continues while the process is alive (screen off / app
-  backgrounded). Fully detached indefinite recording is out of scope.
+- Background recording continues with the screen off, in the background and
+  after the app is removed from Recents. Android may still stop it under severe
+  system pressure; a restored service redelivers the pending start request.
 - Slow-motion needs a camera with constrained high-speed video (≥60 fps);
   otherwise the shutter reports that the device is unsupported. If the HAL
   rejects the high-fps bind, the app falls back to a normal recording bind
@@ -104,7 +105,9 @@ app/src/main/java/com/oriyu90/fcampro/
 - This release was exercised on an Xperia 1 (Android, Japanese and English UI)
   in portrait and landscape, including 12 rapid Pro/normal transitions, nine
   forced rotations without process or preview-surface replacement, 4:3 / 16:9,
-  mode-bar persistence, still capture, video and profile workflows.
+  mode-bar persistence, still capture, video, profile workflows and background
+  recording across Home / rotation / Recents removal. A 14-minute clip and a
+  final 20-second regression clip both finalized without an encoder error.
   Camera HAL behaviour can still vary on other device families.
 
 ## License

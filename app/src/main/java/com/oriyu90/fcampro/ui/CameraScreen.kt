@@ -114,7 +114,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -171,12 +171,12 @@ fun CameraScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val appSettings = remember { AppSettings.get(context) }
-    val settings by viewModel.settings.collectAsState()
-    val availableLenses by viewModel.availableLenses.collectAsState()
-    val profiles by viewModel.profiles.collectAsState()
-    val bgRunning by BackgroundCameraService.running.collectAsState()
-    val noCameraAvailable by viewModel.noCameraAvailable.collectAsState()
-    val lastMedia by viewModel.lastMedia.collectAsState()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val availableLenses by viewModel.availableLenses.collectAsStateWithLifecycle()
+    val profiles by viewModel.profiles.collectAsStateWithLifecycle()
+    val bgRunning by BackgroundCameraService.running.collectAsStateWithLifecycle()
+    val noCameraAvailable by viewModel.noCameraAvailable.collectAsStateWithLifecycle()
+    val lastMedia by viewModel.lastMedia.collectAsStateWithLifecycle()
     val currentOrientation = LocalConfiguration.current.orientation
 
     // One PreviewView and one movable AndroidView owner survive mode and orientation
@@ -185,7 +185,13 @@ fun CameraScreen(
     val previewView = remember {
         PreviewView(context).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-            scaleType = PreviewView.ScaleType.FIT_CENTER
+            // The UI deliberately keeps the selected 4:3 / 16:9 viewfinder
+            // landscape-shaped in both device orientations. FIT_CENTER uses the
+            // rotation-aware stream ratio and pillarboxes it into a narrow,
+            // portrait-shaped TextureView after a device rotation. FILL_CENTER
+            // keeps the live surface attached to the immutable viewfinder frame;
+            // only the capture/display rotation changes.
+            scaleType = PreviewView.ScaleType.FILL_CENTER
         }
     }
     var cameraProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
@@ -223,7 +229,7 @@ fun CameraScreen(
         }
     val panoMaxFrames = PanoEstimate.maxFrames(memoryClassMb)
 
-    val appSnapshot by appSettings.state.collectAsState()
+    val appSnapshot by appSettings.state.collectAsStateWithLifecycle()
     val modeBar =
         remember(appSnapshot.modeBar) {
             ModeBarOrder.sanitize(
@@ -1599,18 +1605,7 @@ fun CameraScreen(
         }
 
         Box(modifier = Modifier.fillMaxSize().background(Color.Black).padding(padding)) {
-            if (!proMode) {
-                // Capture-range-accurate preview in every mode: the box matches
-                // the still aspect so WYSIWYG holds (full-bleed FILL_CENTER
-                // would crop 4:3 captures on tall screens).
-                AspectFitPreviewFrame(
-                    modifier = Modifier.fillMaxSize(),
-                    alignment = if (proLandscape) Alignment.CenterStart else Alignment.TopCenter,
-                ) {
-                    PreviewSurface(Modifier.fillMaxSize())
-                    PreviewDecor()
-                }
-            } else if (!proLandscape && compact) {
+            if (proMode && !proLandscape && compact) {
                 // Portrait: toolbar, gapped preview, summary, panel.
                 Column(Modifier.fillMaxSize()) {
                     ProToolbarBlock(
@@ -1633,7 +1628,7 @@ fun CameraScreen(
                         showToolbar = false,
                     )
                 }
-            } else if (proLandscape) {
+            } else if (proMode && proLandscape) {
                 // Landscape: slim icon strip in the left gap.
                 Row(Modifier.fillMaxSize()) {
                     Column(
@@ -1675,7 +1670,7 @@ fun CameraScreen(
                         showToolbar = true,
                     )
                 }
-            } else {
+            } else if (proMode) {
                 // Tablet portrait: shutter just below the preview's right edge.
                 Row(Modifier.fillMaxSize()) {
                     Column(Modifier.fillMaxHeight().weight(1.3f)) {
@@ -1737,11 +1732,9 @@ fun CameraScreen(
                 maxZoom = maxZoomRatio,
                 onResetZoom = ::resetZoom,
                 panelCollapsed = appSnapshot.panelCollapsed,
-                panelGravity = appSnapshot.panelGravity,
                 modeBar = modeBar,
                 onSetModeBar = { updated -> appSettings.modeBar = updated.map { it.name } },
                 onSetPanelCollapsed = { appSettings.panelCollapsed = it },
-                onSetPanelGravity = { appSettings.panelGravity = it },
                 onToggleGrid = { appSettings.gridLines = !appSettings.gridLines },
                 onOpenGallery = ::openGallery,
                 onCapturePhoto = ::capturePhoto,
@@ -1755,6 +1748,13 @@ fun CameraScreen(
                 onToggleBackground = ::toggleBackground,
                 onOpenSettings = onOpenSettings,
                 onCancelExternal = { onExternalResult(false, null) },
+                streamAspect = streamAspect,
+                previewContent = {
+                    Box(Modifier.fillMaxSize()) {
+                        PreviewSurface(Modifier.fillMaxSize())
+                        PreviewDecor()
+                    }
+                },
             )
             }
         }

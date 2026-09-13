@@ -1,4 +1,13 @@
-# Fcam pro — 設計概要と実装状況（v2.5.0）
+# Fcam pro — 設計概要と実装状況（v2.5.1）
+
+## v2.5.1 の変更点（通常プレビュー配置・高密度UI・BG録画安全化）
+
+- **通常プレビューの所有関係**: 通常モードのプレビューを別の全画面レイヤーとして置かず、`CameraOverlay`のpreview content slotとして構成。横は固定アスペクトのプレビューと操作デッキを兄弟要素として隙間なく並べ、縦はプレビューから操作群へ自然に接続する。
+- **縦横で同じ形**: 明示した4:3／16:9枠内は`PreviewView.ScaleType.FILL_CENTER`とし、回転後のstreamが狭い縦長TextureViewへ縮むのを防止。縦画面でも横長のプレビュー枠を維持し、撮影・表示の下方向だけを更新する。
+- **Sony系の操作密度**: 主要操作を48dp以上の正方形タイルへ統一。3dp角と境界線で制御単位を明確化し、選択は色と枠の両方で示す。二重safe-insetと旧floating panel由来の空白を除去した。
+- **BG録画の状態機械**: bind完了まで`startPending`を保持し二重開始を拒否。Home・画面オフ・履歴削除後もforeground recordingを継続し、停止時は`VideoRecordEvent.Finalize`を待ってからunbindする。`running`は解放完了までtrueなのでActivityカメラとの再bind競合を起こさない。Finalize待ちは5秒でfallbackする。
+- **ライフサイクル**: UIの主要`StateFlow`を`collectAsStateWithLifecycle`で購読し、非表示時の不要なCompose更新を抑制。
+- versionCode 12 / versionName 2.5.1。Xperia 1で通常↔Pro 12回、縦横、4:3／16:9、14分16秒と20.4秒のBG録画、画面オフ・Home・履歴削除・Finalize後のpreview復帰を確認。28テスト、Lint、正式鍵署名Releaseが成功。
 
 ## v2.5.0 の変更点（プレビュー所有権・固定アスペクト・編集可能モードバー・カラープロファイル）
 
@@ -157,7 +166,7 @@ versionCode 4 / versionName 2.0.0。
 - AndroidX AppCompat の per-app locale（アプリ内言語切替）
 - LifecycleService + フォアグラウンドサービス（バックグラウンド録画）
 - compileSdk 36 / minSdk 24 / targetSdk 36。追加 API は全て SDK_INT でガード。
-- パッケージ: com.oriyu90.fcampro / applicationId 同じ / versionCode 11 / versionName 2.5.0
+- パッケージ: com.oriyu90.fcampro / applicationId 同じ / versionCode 12 / versionName 2.5.1
 
 ## 2. 実装済み機能
 
@@ -181,9 +190,9 @@ versionCode 4 / versionName 2.0.0。
 | 設定画面 | 言語、既定アスペクト比、既定タイマー、タイムラプス間隔、シャッター音、バックグラウンド音声、バージョン、開発者サイト等へのリンク |
 | UI | 固定ダークテーマ。エッジトゥエッジ（safeDrawing インセット）。縦画面は縦積み、横画面・幅 600dp 以上は右サイドの縦レール。キャプチャボタンに contentDescription |
 
-## 3. 既知の制約（v2.5.0 時点）
+## 3. 既知の制約（v2.5.1 時点）
 
-- バックグラウンド録画はプロセス生存が前提（画面オフ・アプリバックグラウンドは可）。タスク除去・プロセス終了で停止。完全デタッチの無制限録画は対象外。
+- バックグラウンド録画は画面オフ・Home・履歴削除後も継続するが、OSの強いメモリ／電力制約下での無制限継続は保証しない。
 - スローモーションは端末の constrained high-speed video が 60fps 以上の場合に利用でき、保存時に音声を除いて30fps基準へ時間伸長する。パノラマは平行移動推定＋フェザーブレンドのため、強い視差では継ぎ目が出る場合がある。
 - 論理マルチカメラの背後に隠れた物理サブカメラは個別選択できない場合がある。
 - Xperia 1 SOV40 と Galaxy S24 SC-51E で主要経路を確認済み。全メーカー・全 HAL 構成の網羅はしていない。

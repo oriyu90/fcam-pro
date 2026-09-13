@@ -71,6 +71,7 @@ class BackgroundCameraService : LifecycleService() {
     // Guards against two rapid start() calls queuing two bind sequences (the second
     // would overwrite `recording` and leak the first Recording).
     private var startPending = false
+    private var stopTimeout: Runnable? = null
     private var largeIconCache: android.graphics.Bitmap? = null
     private val main = Handler(Looper.getMainLooper())
 
@@ -83,11 +84,14 @@ class BackgroundCameraService : LifecycleService() {
         // Minimal type here: CAMERA only. The MICROPHONE type is added later only
         // when audio is actually enabled (Android 14+ throws if a MIC-typed FGS
         // runs without the RECORD_AUDIO permission).
-        startForegroundSafely(getString(R.string.notif_starting_text), cameraOnlyTypes())
+        if (!startForegroundSafely(getString(R.string.notif_starting_text), cameraOnlyTypes())) {
+            stopping = true
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
+        if (stopping) return START_NOT_STICKY
         if (intent?.action == ACTION_STOP) {
             stopEverything()
             return START_NOT_STICKY
@@ -120,15 +124,12 @@ class BackgroundCameraService : LifecycleService() {
         if (recording == null && !stopping && !startPending) {
             _running.value = true
             startPending = true
-            main.postDelayed(
-                {
-                    startPending = false
-                    if (!stopping) startRecording()
-                },
-                350L,
-            )
+            main.postDelayed({ if (!stopping) startRecording() }, 350L)
         }
-        return START_NOT_STICKY
+        // Redeliver the selected camera after a system reclaim. A camera FGS is
+        // expected to survive leaving/clearing the app task; task removal itself
+        // must not truncate the recording.
+        return START_REDELIVER_INTENT
     }
 
     /** Pause <-> resume toggle from the notification button. */
@@ -267,7 +268,13 @@ class BackgroundCameraService : LifecycleService() {
         // Declare the MICROPHONE foreground-service type only when audio is really
         // used; otherwise a MIC-typed service without the permission fails to start
         // on Android 14+.
-        if (wantAudio) startForegroundSafely(getString(R.string.notif_starting_text), micTypes())
+        if (
+            wantAudio &&
+                !startForegroundSafely(getString(R.string.notif_starting_text), micTypes())
+        ) {
+            fail("microphone foreground service unavailable")
+            return
+        }
 
         try {
             var pending = videoCapture.output.prepareRecording(this, output)
@@ -276,18 +283,22 @@ class BackgroundCameraService : LifecycleService() {
                 pending.start(ContextCompat.getMainExecutor(this)) { event ->
                     when (event) {
                         is VideoRecordEvent.Start -> {
-                            startedAtElapsed = SystemClock.elapsedRealtime()
-                            hasStarted = true
-                            paused = false
-                            pausedAccumMs = 0L
-                            startTicker()
-                            updateNotification(getString(R.string.notif_recording_text))
+                            startPending = false
+                            if (!stopping) {
+                                startedAtElapsed = SystemClock.elapsedRealtime()
+                                hasStarted = true
+                                paused = false
+                                pausedAccumMs = 0L
+                                startTicker()
+                                updateNotification(getString(R.string.notif_recording_text))
+                            }
                         }
                         is VideoRecordEvent.Finalize -> {
+                            recording = null
                             if (event.hasError()) {
                                 Log.e(TAG, "recording finalized with error ${event.error}")
                             }
-                            if (!stopping) stopEverything()
+                            if (stopping) finishStop() else stopEverything()
                         }
                         else -> Unit
                     }
@@ -323,6 +334,7 @@ class BackgroundCameraService : LifecycleService() {
 
     private fun fail(reason: String) {
         Log.w(TAG, "background recording failed: $reason")
+        startPending = false
         stopEverything()
     }
 
@@ -334,25 +346,46 @@ class BackgroundCameraService : LifecycleService() {
         hasStarted = false
         pausedAccumMs = 0L
         main.removeCallbacksAndMessages(null)
-        _running.value = false
         tickerJob?.cancel()
-        runCatching { recording?.stop() }
+        val active = recording
+        if (active != null) {
+            // CameraX finalizes the muxer asynchronously. Releasing the camera or
+            // killing the service here can leave a zero-duration/corrupt MP4.
+            updateNotification(getString(R.string.notif_stopping_text))
+            runCatching { active.stop() }
+                .onFailure { finishStop() }
+            val timeout = Runnable { finishStop() }
+            stopTimeout = timeout
+            main.postDelayed(timeout, STOP_FINALIZE_TIMEOUT_MS)
+            return
+        }
+        finishStop()
+    }
+
+    private fun finishStop() {
+        stopTimeout?.let(main::removeCallbacks)
+        stopTimeout = null
         recording = null
         runCatching { cameraProvider?.unbindAll() }
         cameraProvider = null
+        // Re-enable the Activity camera only after the recorder muxer has been
+        // finalized and the service camera is fully unbound.
+        _running.value = false
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // Flush the current file cleanly instead of letting the process die mid-write.
-        stopEverything()
+        // A foreground background-recording service is intentionally independent
+        // from the launcher task. The persistent notification remains the explicit
+        // pause/stop surface after the task is removed.
         super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {
         _running.value = false
         main.removeCallbacksAndMessages(null)
+        stopTimeout = null
         tickerJob?.cancel()
         runCatching { recording?.stop() }
         recording = null
@@ -373,18 +406,18 @@ class BackgroundCameraService : LifecycleService() {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         else 0
 
-    private fun startForegroundSafely(text: String, type: Int) {
+    private fun startForegroundSafely(text: String, type: Int): Boolean =
         try {
             ServiceCompat.startForeground(this, NOTIF_ID, buildNotification(text), type)
+            true
         } catch (e: Exception) {
             Log.e(TAG, "startForeground failed", e)
             _running.value = false
             stopSelf()
+            false
         }
-    }
 
     private fun updateNotification(text: String) {
-        if (stopping) return
         runCatching {
             getSystemService(NotificationManager::class.java)
                 ?.notify(NOTIF_ID, buildNotification(text))
@@ -463,6 +496,7 @@ class BackgroundCameraService : LifecycleService() {
         private const val TAG = "BgCameraService"
         private const val CHANNEL_ID = "fcam_background_recording"
         private const val NOTIF_ID = 4211
+        private const val STOP_FINALIZE_TIMEOUT_MS = 5_000L
         const val ACTION_STOP = "com.oriyu90.fcampro.action.STOP_BG_RECORDING"
         const val ACTION_TOGGLE_PAUSE = "com.oriyu90.fcampro.action.TOGGLE_PAUSE_BG_RECORDING"
         const val EXTRA_LENS_FRONT = "com.oriyu90.fcampro.extra.LENS_FRONT"

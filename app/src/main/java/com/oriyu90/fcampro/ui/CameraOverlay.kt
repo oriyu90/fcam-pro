@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -117,11 +118,9 @@ fun CameraOverlay(
     maxZoom: Float,
     onResetZoom: () -> Unit,
     panelCollapsed: Boolean,
-    panelGravity: Int,
     modeBar: List<CameraMode>,
     onSetModeBar: (List<CameraMode>) -> Unit,
     onSetPanelCollapsed: (Boolean) -> Unit,
-    onSetPanelGravity: (Int) -> Unit,
     onToggleGrid: () -> Unit,
     onOpenGallery: () -> Unit,
     onCapturePhoto: () -> Unit,
@@ -135,6 +134,8 @@ fun CameraOverlay(
     onToggleBackground: () -> Unit,
     onOpenSettings: () -> Unit,
     onCancelExternal: () -> Unit,
+    streamAspect: Float,
+    previewContent: @Composable () -> Unit,
 ) {
     val cfg = LocalConfiguration.current
     val landscape = cfg.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -142,15 +143,18 @@ fun CameraOverlay(
 
     // An OS capture-and-return request uses a minimal fixed bar.
     if (external != null) {
-        ExternalCaptureBar(
-            settings = settings,
-            isRecording = isRecording,
-            isCapturing = isCapturing,
-            shutterEnabled = !bgRunning,
-            onCapturePhoto = onCapturePhoto,
-            onToggleRecording = onToggleRecording,
-            onCancel = onCancelExternal,
-        )
+        Box(Modifier.fillMaxSize()) {
+            previewContent()
+            ExternalCaptureBar(
+                settings = settings,
+                isRecording = isRecording,
+                isCapturing = isCapturing,
+                shutterEnabled = !bgRunning,
+                onCapturePhoto = onCapturePhoto,
+                onToggleRecording = onToggleRecording,
+                onCancel = onCancelExternal,
+            )
+        }
         return
     }
 
@@ -197,30 +201,24 @@ fun CameraOverlay(
     // Pro (manual) mode is composed by CameraScreen (ProScreen layouts);
     // this overlay only serves the normal phone/tablet panels.
     when (layout) {
-        Layout.PHONE_PORTRAIT -> PhonePortrait(shared)
+        Layout.PHONE_PORTRAIT -> PhonePortrait(shared, streamAspect, previewContent)
         Layout.LARGE_PORTRAIT ->
-            SidePanelLayout(
-                shared = shared,
-                onLeft = true,
-                twoColumnIcons = true,
-                verticalTabs = true,
-                allowGravity = true,
-                gravity = panelGravity,
+            NormalSideLayout(
+                shared,
+                streamAspect,
+                panelOnLeft = true,
                 collapsed = panelCollapsed,
                 onSetCollapsed = onSetPanelCollapsed,
-                onSetGravity = onSetPanelGravity,
+                previewContent = previewContent,
             )
         Layout.SIDE ->
-            SidePanelLayout(
-                shared = shared,
-                onLeft = false,
-                twoColumnIcons = false,
-                verticalTabs = false,
-                allowGravity = false,
-                gravity = 1,
+            NormalSideLayout(
+                shared,
+                streamAspect,
+                panelOnLeft = false,
                 collapsed = panelCollapsed,
                 onSetCollapsed = onSetPanelCollapsed,
-                onSetGravity = onSetPanelGravity,
+                previewContent = previewContent,
             )
     }
 }
@@ -273,48 +271,129 @@ internal class SharedActions(
 // ============================ PHONE PORTRAIT ============================
 
 @Composable
-private fun PhonePortrait(s: SharedActions) {
-    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
-        ControlIcons(
-            s = s,
-            columns = 1,
-            modifier =
-                Modifier.fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
-                    .padding(4.dp),
-        )
+private fun PhonePortrait(
+    s: SharedActions,
+    streamAspect: Float,
+    previewContent: @Composable () -> Unit,
+) {
+    Column(Modifier.fillMaxSize().background(Color.Black)) {
+        Box(
+            Modifier.fillMaxWidth().aspectRatio(streamAspect).background(Color.Black),
+        ) { previewContent() }
         Column(
             modifier =
-                Modifier.fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.72f))
-                    .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                Modifier.fillMaxWidth().weight(1f)
+                    .background(Color.Black)
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            if (s.settings.cameraMode == CameraMode.PANORAMA) {
-                PanoProgressRow(s)
-            } else if (s.settings.cameraMode == CameraMode.OTHERS) {
-                OthersMenu(s = s, twoPerRow = false)
-            } else {
-                // Pinch-zoom pill only once zoomed, so the idle view stays clean.
-                if (s.zoomRatio > 1.01f) {
-                    ZoomPill(
-                        zoomRatio = s.zoomRatio,
-                        maxZoom = s.maxZoom,
-                        enabled = !s.bgRunning,
-                        onReset = s.onResetZoom,
-                    )
+            ControlIcons(
+                s = s,
+                columns = 1,
+                modifier = Modifier.fillMaxWidth().background(Color.Black),
+            )
+            Box(
+                Modifier.fillMaxWidth().weight(1f),
+                contentAlignment =
+                    if (s.settings.cameraMode == CameraMode.OTHERS) Alignment.TopCenter
+                    else Alignment.Center,
+            ) {
+                Column(
+                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    if (s.settings.cameraMode == CameraMode.PANORAMA) {
+                        PanoProgressRow(s)
+                    } else if (s.settings.cameraMode == CameraMode.OTHERS) {
+                        OthersMenu(s = s, twoPerRow = false)
+                    } else {
+                        if (s.zoomRatio > 1.01f) {
+                            ZoomPill(
+                                zoomRatio = s.zoomRatio,
+                                maxZoom = s.maxZoom,
+                                enabled = !s.bgRunning,
+                                onReset = s.onResetZoom,
+                            )
+                        }
+                        LensZoomPills(
+                            lenses = s.availableLenses.filter { it.isFront == s.settings.isFrontCamera },
+                            current = s.settings.currentLens,
+                            enabled = !s.isRecording && !s.bgRunning,
+                            onSelect = { s.viewModel.setLens(it) },
+                        )
+                    }
                 }
-                LensZoomPills(
-                    lenses = s.availableLenses.filter { it.isFront == s.settings.isFrontCamera },
-                    current = s.settings.currentLens,
-                    enabled = !s.isRecording && !s.bgRunning,
-                    onSelect = { s.viewModel.setLens(it) },
-                )
             }
             IphoneModeTabs(s)
             ShutterBar(s)
+        }
+    }
+}
+
+/**
+ * Sony-style landscape/tablet composition. The viewfinder and control deck are
+ * siblings, so neither can cover or displace the other and the full remainder
+ * beside the immutable-aspect preview is useful control space.
+ */
+@Composable
+private fun NormalSideLayout(
+    s: SharedActions,
+    streamAspect: Float,
+    panelOnLeft: Boolean,
+    collapsed: Boolean,
+    onSetCollapsed: (Boolean) -> Unit,
+    previewContent: @Composable () -> Unit,
+) {
+    @Composable
+    fun Preview() {
+        Box(
+            Modifier.fillMaxHeight()
+                .aspectRatio(streamAspect, matchHeightConstraintsFirst = true)
+                .background(Color.Black),
+        ) { previewContent() }
+    }
+
+    @Composable
+    fun androidx.compose.foundation.layout.RowScope.Deck() {
+        Column(
+            Modifier.weight(1f).fillMaxHeight()
+                .background(Color.Black)
+                .verticalScroll(rememberScrollState())
+                .padding(6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            ControlIcons(s = s, columns = 3)
+            PanelBody(s = s, verticalTabs = false, othersTwoPerRow = true)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                ControlTile(onClick = { onSetCollapsed(true) }) {
+                    Icon(
+                        if (panelOnLeft) Icons.Default.ChevronLeft else Icons.Default.ChevronRight,
+                        contentDescription = stringResource(R.string.cd_panel_close),
+                        tint = Color.White,
+                    )
+                }
+            }
+        }
+    }
+
+    if (collapsed) {
+        Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier.fillMaxHeight()
+                    .aspectRatio(streamAspect, matchHeightConstraintsFirst = true)
+                    .align(Alignment.Center),
+            ) { previewContent() }
+            CollapsedCluster(
+                s = s,
+                anchor = if (panelOnLeft) Alignment.CenterStart else Alignment.CenterEnd,
+                onExpand = { onSetCollapsed(false) },
+            )
+        }
+    } else {
+        Row(Modifier.fillMaxSize().background(Color.Black)) {
+            if (panelOnLeft) Deck()
+            Preview()
+            if (!panelOnLeft) Deck()
         }
     }
 }
@@ -369,9 +448,14 @@ private fun LensZoomPills(
                 else "×%.1f".format(ratio)
             Box(
                 modifier =
-                    Modifier.size(44.dp)
-                        .clip(CircleShape)
+                    Modifier.size(48.dp)
+                        .clip(RoundedCornerShape(3.dp))
                         .background(if (selected) Color.White else Color.White.copy(alpha = 0.16f))
+                        .border(
+                            1.dp,
+                            if (selected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.24f),
+                            RoundedCornerShape(3.dp),
+                        )
                         .clickable(enabled = enabled) { onSelect(lens) },
                 contentAlignment = Alignment.Center,
             ) {
@@ -441,90 +525,6 @@ private fun PanoProgressRow(s: SharedActions) {
                 style = MaterialTheme.typography.labelSmall,
             )
         }
-    }
-}
-
-// ============================ SIDE / LARGE PORTRAIT ============================
-
-@Composable
-private fun SidePanelLayout(
-    shared: SharedActions,
-    onLeft: Boolean,
-    twoColumnIcons: Boolean,
-    verticalTabs: Boolean,
-    allowGravity: Boolean,
-    gravity: Int,
-    collapsed: Boolean,
-    onSetCollapsed: (Boolean) -> Unit,
-    onSetGravity: (Int) -> Unit,
-) {
-    Box(Modifier.fillMaxSize()) {
-        if (collapsed) {
-            CollapsedCluster(
-                s = shared,
-                anchor =
-                    if (onLeft) Alignment.CenterStart else Alignment.CenterEnd,
-                onExpand = { onSetCollapsed(false) },
-            )
-        } else {
-            val panelAlign =
-                when {
-                    !allowGravity -> if (onLeft) Alignment.CenterStart else Alignment.CenterEnd
-                    gravity == 0 -> Alignment.TopStart
-                    gravity == 1 -> Alignment.CenterStart
-                    else -> Alignment.BottomStart
-                }
-            val side = !allowGravity
-            Column(
-                modifier =
-                    Modifier.align(panelAlign)
-                        .widthIn(max = 380.dp)
-                        .then(if (side) Modifier.fillMaxHeight() else Modifier.wrapContentHeight())
-                        .background(Color.Black.copy(alpha = 0.6f))
-                        .windowInsetsPadding(WindowInsets.safeDrawing)
-                        .verticalScroll(rememberScrollState())
-                        .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                ControlIcons(s = shared, columns = if (twoColumnIcons) 2 else 1)
-                PanelBody(s = shared, verticalTabs = verticalTabs, othersTwoPerRow = true)
-
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (allowGravity) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            GravityButton(R.string.panel_pos_top, gravity == 0) { onSetGravity(0) }
-                            GravityButton(R.string.panel_pos_center, gravity == 1) { onSetGravity(1) }
-                            GravityButton(R.string.panel_pos_bottom, gravity == 2) { onSetGravity(2) }
-                        }
-                    } else {
-                        Spacer(Modifier.width(1.dp))
-                    }
-                    IconButton(onClick = { onSetCollapsed(true) }) {
-                        Icon(
-                            if (onLeft) Icons.Default.ChevronLeft else Icons.Default.ChevronRight,
-                            contentDescription = stringResource(R.string.cd_panel_close),
-                            tint = Color.White,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun GravityButton(labelRes: Int, selected: Boolean, onClick: () -> Unit) {
-    TextButton(onClick = onClick) {
-        Text(
-            stringResource(labelRes),
-            style = MaterialTheme.typography.labelSmall,
-            color = if (selected) MaterialTheme.colorScheme.primary else Color.White,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-        )
     }
 }
 
@@ -655,6 +655,31 @@ private fun PanelBody(s: SharedActions, verticalTabs: Boolean, othersTwoPerRow: 
 // ============================ ICONS ============================
 
 @Composable
+private fun ControlTile(
+    selected: Boolean = false,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val shape = RoundedCornerShape(3.dp)
+    Box(
+        Modifier.size(48.dp)
+            .clip(shape)
+            .background(if (selected) Color.White.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.07f))
+            .border(
+                1.dp,
+                if (selected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.18f),
+                shape,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxSize()) {
+            content()
+        }
+    }
+}
+
+@Composable
 internal fun ControlIcons(s: SharedActions, columns: Int, modifier: Modifier = Modifier) {
     val photoOrVideo = isStillMode(s.settings.cameraMode)
     val caps = s.settings.currentLens?.capabilities
@@ -662,7 +687,8 @@ internal fun ControlIcons(s: SharedActions, columns: Int, modifier: Modifier = M
     val icons = buildList<@Composable () -> Unit> {
         if (photoOrVideo) {
             add {
-                IconButton(
+                ControlTile(
+                    selected = s.settings.isManualMode,
                     onClick = { s.viewModel.toggleManualMode() },
                     enabled = caps?.supportsManualSensor == true,
                 ) {
@@ -677,7 +703,10 @@ internal fun ControlIcons(s: SharedActions, columns: Int, modifier: Modifier = M
             }
         }
         add {
-            IconButton(onClick = { s.viewModel.cycleFlashMode() }) {
+            ControlTile(
+                selected = s.settings.flashMode != ImageCapture.FLASH_MODE_AUTO,
+                onClick = { s.viewModel.cycleFlashMode() },
+            ) {
                 Icon(
                     when (s.settings.flashMode) {
                         ImageCapture.FLASH_MODE_ON -> Icons.Default.FlashOn
@@ -690,7 +719,10 @@ internal fun ControlIcons(s: SharedActions, columns: Int, modifier: Modifier = M
             }
         }
         add {
-            IconButton(onClick = { s.viewModel.cycleTimer() }) {
+            ControlTile(
+                selected = s.settings.timerSeconds > 0,
+                onClick = { s.viewModel.cycleTimer() },
+            ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         Icons.Default.Timer,
@@ -710,7 +742,7 @@ internal fun ControlIcons(s: SharedActions, columns: Int, modifier: Modifier = M
             }
         }
         add {
-            IconButton(onClick = { s.viewModel.cycleAspectRatio() }) {
+            ControlTile(onClick = { s.viewModel.cycleAspectRatio() }) {
                 Icon(
                     if (s.settings.aspectRatio == AspectRatio.RATIO_16_9) Icons.Default.Crop169
                     else Icons.Default.Crop54,
@@ -720,7 +752,7 @@ internal fun ControlIcons(s: SharedActions, columns: Int, modifier: Modifier = M
             }
         }
         add {
-            IconButton(onClick = s.onToggleGrid) {
+            ControlTile(selected = s.gridOn, onClick = s.onToggleGrid) {
                 Icon(
                     if (s.gridOn) Icons.Default.GridOn else Icons.Default.GridOff,
                     contentDescription = stringResource(R.string.cd_grid),
@@ -729,7 +761,10 @@ internal fun ControlIcons(s: SharedActions, columns: Int, modifier: Modifier = M
             }
         }
         add {
-            IconButton(onClick = { s.viewModel.toggleAeAfLock() }) {
+            ControlTile(
+                selected = s.settings.aeAfLocked,
+                onClick = { s.viewModel.toggleAeAfLock() },
+            ) {
                 Icon(
                     if (s.settings.aeAfLocked) Icons.Default.Lock else Icons.Default.LockOpen,
                     contentDescription = stringResource(R.string.cd_ae_af_lock),
@@ -739,7 +774,7 @@ internal fun ControlIcons(s: SharedActions, columns: Int, modifier: Modifier = M
             }
         }
         add {
-            IconButton(onClick = s.onOpenSettings) {
+            ControlTile(onClick = s.onOpenSettings) {
                 Icon(
                     Icons.Default.Settings,
                     contentDescription = stringResource(R.string.cd_settings),
@@ -753,7 +788,7 @@ internal fun ControlIcons(s: SharedActions, columns: Int, modifier: Modifier = M
         Row(
             modifier =
                 if (modifier == Modifier) Modifier.fillMaxWidth() else modifier,
-            horizontalArrangement = Arrangement.SpaceEvenly,
+            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             icons.forEach { it() }
@@ -766,7 +801,7 @@ internal fun ControlIcons(s: SharedActions, columns: Int, modifier: Modifier = M
             icons.chunked(columns).forEach { row ->
                 Row(
                     Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     row.forEach { it() }
@@ -910,10 +945,15 @@ private fun LensRow(
             val selected = current?.id == lens.id
             Box(
                 modifier =
-                    Modifier.size(46.dp)
-                        .clip(CircleShape)
+                    Modifier.size(48.dp)
+                        .clip(RoundedCornerShape(3.dp))
                         .background(
                             if (selected) MaterialTheme.colorScheme.primary else Color.DarkGray
+                        )
+                        .border(
+                            1.dp,
+                            if (selected) Color.White else Color.White.copy(alpha = 0.22f),
+                            RoundedCornerShape(3.dp),
                         )
                         .clickable(enabled = enabled) { onSelect(lens) },
                 contentAlignment = Alignment.Center,
@@ -992,6 +1032,14 @@ private fun DraggableModeTab(s: SharedActions, mode: CameraMode, vertical: Boole
                     translationY = dragY
                     alpha = if (dragX != 0f || dragY != 0f) 0.78f else 1f
                 }
+                .widthIn(min = 64.dp, max = 88.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(if (selected) Color.White.copy(alpha = 0.12f) else Color.Transparent)
+                .border(
+                    1.dp,
+                    if (selected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.12f),
+                    RoundedCornerShape(3.dp),
+                )
                 .pointerInput(mode, s.modeBar) {
                     detectDragGestures(
                         onDrag = { change, amount ->
@@ -1140,7 +1188,11 @@ private fun DraggableOtherMode(mode: CameraMode, onClick: () -> Unit, onAdd: () 
                 .padding(8.dp),
     ) {
         Box(
-            modifier = Modifier.size(52.dp).clip(CircleShape).background(Color.DarkGray),
+            modifier =
+                Modifier.size(52.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(Color.DarkGray)
+                    .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(3.dp)),
             contentAlignment = Alignment.Center,
         ) {
             Icon(modeIcon(mode), contentDescription = stringResource(modeTabRes(mode)), tint = Color.White)
@@ -1157,7 +1209,11 @@ private fun OthersMenuItem(icon: ImageVector, text: String, onClick: () -> Unit)
         modifier = Modifier.clickable(onClick = onClick).padding(8.dp),
     ) {
         Box(
-            modifier = Modifier.size(52.dp).clip(CircleShape).background(Color.DarkGray),
+            modifier =
+                Modifier.size(52.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(Color.DarkGray)
+                    .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(3.dp)),
             contentAlignment = Alignment.Center,
         ) {
             Icon(imageVector = icon, contentDescription = null, tint = Color.White)
