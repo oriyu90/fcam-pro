@@ -99,6 +99,14 @@ import kotlin.math.roundToInt
 
 private enum class Layout { PHONE_PORTRAIT, LARGE_PORTRAIT, SIDE }
 
+/**
+ * Photo/video capture uses all height not needed by the compact controls,
+ * unlike the fixed landscape frame used by the Pro workspace. Utility modes
+ * reserve enough room for their menu or panorama actions.
+ */
+internal fun normalPhoneUsesExpandedPreview(mode: CameraMode): Boolean =
+    mode != CameraMode.OTHERS && mode != CameraMode.PANORAMA
+
 @Composable
 fun CameraOverlay(
     viewModel: CameraViewModel,
@@ -276,13 +284,44 @@ private fun PhonePortrait(
     streamAspect: Float,
     previewContent: @Composable () -> Unit,
 ) {
+    val lenses = s.availableLenses.filter { it.isFront == s.settings.isFrontCamera }
+    val showCaptureOverlay = normalPhoneUsesExpandedPreview(s.settings.cameraMode)
     Column(Modifier.fillMaxSize().background(Color.Black)) {
         Box(
-            Modifier.fillMaxWidth().aspectRatio(streamAspect).background(Color.Black),
-        ) { previewContent() }
+            Modifier.fillMaxWidth()
+                .then(
+                    if (showCaptureOverlay) Modifier.weight(1f)
+                    else Modifier.aspectRatio(streamAspect)
+                )
+                .background(Color.Black),
+        ) {
+            previewContent()
+            if (showCaptureOverlay) {
+                Column(
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    if (s.zoomRatio > 1.01f) {
+                        ZoomPill(
+                            zoomRatio = s.zoomRatio,
+                            maxZoom = s.maxZoom,
+                            enabled = !s.bgRunning,
+                            onReset = s.onResetZoom,
+                        )
+                    }
+                    LensZoomPills(
+                        lenses = lenses,
+                        current = s.settings.currentLens,
+                        enabled = !s.isRecording && !s.bgRunning,
+                        onSelect = { s.viewModel.setLens(it) },
+                    )
+                }
+            }
+        }
         Column(
             modifier =
-                Modifier.fillMaxWidth().weight(1f)
+                Modifier.fillMaxWidth()
+                    .then(if (showCaptureOverlay) Modifier else Modifier.weight(1f))
                     .background(Color.Black)
                     .padding(horizontal = 6.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -292,35 +331,22 @@ private fun PhonePortrait(
                 columns = 1,
                 modifier = Modifier.fillMaxWidth().background(Color.Black),
             )
-            Box(
-                Modifier.fillMaxWidth().weight(1f),
-                contentAlignment =
-                    if (s.settings.cameraMode == CameraMode.OTHERS) Alignment.TopCenter
-                    else Alignment.Center,
-            ) {
-                Column(
-                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+            if (!showCaptureOverlay) {
+                Box(
+                    Modifier.fillMaxWidth().weight(1f),
+                    contentAlignment =
+                        if (s.settings.cameraMode == CameraMode.OTHERS) Alignment.TopCenter
+                        else Alignment.Center,
                 ) {
-                    if (s.settings.cameraMode == CameraMode.PANORAMA) {
-                        PanoProgressRow(s)
-                    } else if (s.settings.cameraMode == CameraMode.OTHERS) {
-                        OthersMenu(s = s, twoPerRow = false)
-                    } else {
-                        if (s.zoomRatio > 1.01f) {
-                            ZoomPill(
-                                zoomRatio = s.zoomRatio,
-                                maxZoom = s.maxZoom,
-                                enabled = !s.bgRunning,
-                                onReset = s.onResetZoom,
-                            )
+                    Column(
+                        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        if (s.settings.cameraMode == CameraMode.PANORAMA) {
+                            PanoProgressRow(s)
+                        } else if (s.settings.cameraMode == CameraMode.OTHERS) {
+                            OthersMenu(s = s, twoPerRow = false)
                         }
-                        LensZoomPills(
-                            lenses = s.availableLenses.filter { it.isFront == s.settings.isFrontCamera },
-                            current = s.settings.currentLens,
-                            enabled = !s.isRecording && !s.bgRunning,
-                            onSelect = { s.viewModel.setLens(it) },
-                        )
                     }
                 }
             }

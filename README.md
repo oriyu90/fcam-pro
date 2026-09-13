@@ -18,7 +18,7 @@ localized Japanese / English interface.
 | Capture | Photo, video, slow-motion & panorama, 4:3 / 16:9, self-timer (0/3/10 s), flash auto/on/off, rule-of-thirds grid, tap to lock / unlock focus, pinch-to-zoom with an on-screen ratio pill (tap to reset to 1.0x; camera and UI always start at 1.0x), one-tap jump to the system gallery |
 | Manual controls | A Photography Pro-inspired control deck for ISO, shutter speed, focus, white balance, EV, format and microphone, followed by a dedicated profile dock. Each item shows its live value and offers photographic presets limited to the selected lens's reported range. Exposure stays atomic: setting ISO or speed fills the other with a safe, clamped default. RAW-capable lenses expose JPEG / JPEG+RAW / RAW (DNG) choices |
 | Lenses | Ultra-wide / wide / tele / macro / front — binds the real `cameraId`, including sub-cameras hidden behind a logical multi-camera (e.g. Galaxy telephoto) via `setPhysicalCameraId`; depth-only cameras are excluded, same-focal logical/physical twins are deduped; a zoom-factor pill row (×0.5 / ×1 / ×2 …) in phone mode, switcher row on larger screens. Aperture (f-number) is shown when the HAL reports it |
-| Adaptive UI | The preview keeps the selected capture aspect in portrait and landscape while controls rotate around it. Pro mode uses a Photography Pro-inspired portrait deck and a two-column landscape rail. The default mode bar is Photo / Video / Others; Slow motion and Panorama can be dragged out of Others and any optional bar mode can be dragged back |
+| Adaptive UI | Standard photo/video/slow-motion uses the full portrait height above the compact control deck; the selected output ratio is center-cropped in this immersive viewfinder. Pro keeps the exact 4:3 / 16:9 landscape-shaped frame in both orientations and uses a Photography Pro-inspired portrait deck or two-column landscape rail. The default mode bar is Photo / Video / Others; Slow motion and Panorama can be dragged out of Others and any optional bar mode can be dragged back |
 | Profiles | The permanent Pro dock has an icon-only save button plus color-coded profile buttons. Save as new or overwrite, choose one of six colors, apply with a tap, long-drag to reorder, or keep holding for confirmed deletion. Room migrations preserve existing profiles across updates |
 | OTHERS | Time-lapse (configurable 1–10 s interval, auto-stop on repeated errors), background video recording via a foreground service with an elapsed-time notification (continues the active lens, disabled shutter/lens UI while running), QR detection with open / copy |
 | System integration | Registers for `IMAGE_CAPTURE` / `VIDEO_CAPTURE` / `STILL_IMAGE_CAMERA`, so it can be set as the OS default camera app and returns results to the caller |
@@ -81,7 +81,7 @@ app/src/main/java/com/oriyu90/fcampro/
     └── theme/               # fixed dark Material 3 theme
 ```
 
-## Known limitations (v2.5.1)
+## Known limitations (v2.5.2)
 
 - Background recording continues with the screen off, in the background and
   after the app is removed from Recents. Android may still stop it under severe
@@ -129,6 +129,7 @@ MIT — see [LICENSE](LICENSE). Author: **Yuki_Orita** (折田悠希 / おりた
 - Photography Pro を参考にした操作デッキから ISO・シャッター速度・フォーカス距離・ホワイトバランス・露出補正・保存形式・マイクを選択し、その下に専用プロファイルドックを配置。現在値を常時表示し、選択中の物理カメラが報告する範囲内の実用的なプリセットだけを提示。露出の手動化は不可分で、ISO・速度の片方だけ設定するともう片方を安全な既定値で補完。センサーRAW対応レンズでは JPEG／JPEG+RAW／RAW（DNG）を選択可能
 - 超広角／広角／望遠／マクロ／前面レンズを実 `cameraId` で切り替え（論理マルチカメラ背後のサブカメラ＝Galaxy の望遠等も `setPhysicalCameraId` で対応）。HAL が報告する絞り値（F値）を表示
 - プロモード時は専用レイアウト：選択した4:3／16:9のプレビュー形状を縦横で変えず、上部状態帯（バッテリー／モード／空き容量／焦点距離）、SS・F値・EV・ISO サマリー、現在値付きの設定デッキ、設定集中パネル＋シャッターを配置。縦画面は Photography Pro を縦向きに再構成した上下配置、横画面は全項目が欠けない2列サイドデッキ
+- 通常の写真／動画／スローモーションは、縦画面でコンパクトな操作デッキの直上までプレビューを拡張し、出力の4:3／16:9は中央クロップ表示。その他／パノラマは専用操作を隠さないため固定枠を使用
 - 画面に応じた操作パネル: スマホ縦は従来の縦積み、≥600dp 縦は左に浮くパネル（アイコン 2 列・縦タブ・上/中央/下寄せ）、横向きは右のサイドバー。パネルは開閉でき、閉じるとシャッター＋バッテリー＋展開ボタンだけの移動可能なクラスタになる
 - プロ画面に常設したフロッピーアイコンから、色を選んで新規プロファイルを作成、または既存を上書き。色付きボタンをタップして適用、長押しドラッグで並び替え、さらに保持すると削除確認を表示。Room の既存データはアップデート時も保持
 - 初期モードバーは写真／動画／その他。スロー／パノラマは「その他」に入り、下方向へのドラッグでバーへ追加できる。バー上の任意モードは並び替え・上方向ドラッグで「その他」へ戻せ、構成は再起動後も保持

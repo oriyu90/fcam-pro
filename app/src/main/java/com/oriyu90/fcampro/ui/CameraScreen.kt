@@ -185,12 +185,10 @@ fun CameraScreen(
     val previewView = remember {
         PreviewView(context).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-            // The UI deliberately keeps the selected 4:3 / 16:9 viewfinder
-            // landscape-shaped in both device orientations. FIT_CENTER uses the
-            // rotation-aware stream ratio and pillarboxes it into a narrow,
-            // portrait-shaped TextureView after a device rotation. FILL_CENTER
-            // keeps the live surface attached to the immutable viewfinder frame;
-            // only the capture/display rotation changes.
+            // Containers choose the frame shape: Pro keeps its exact-aspect,
+            // landscape-shaped workspace frame, while normal phone capture modes
+            // use the available portrait height. FILL_CENTER keeps the one live
+            // surface attached through either layout without pillarboxing.
             scaleType = PreviewView.ScaleType.FILL_CENTER
         }
     }

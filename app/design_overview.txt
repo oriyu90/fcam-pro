@@ -1,4 +1,11 @@
-# Fcam pro — 設計概要と実装状況（v2.5.1）
+# Fcam pro — 設計概要と実装状況（v2.5.2）
+
+## v2.5.2 の変更点（通常モードの没入型縦プレビュー）
+
+- **モード別プレビュー方針**: スマホ縦画面の通常PHOTO／VIDEO／SLOWMOは、コンパクト操作デッキ以外の残り高をすべてプレビューへ割り当てる。選択中の4:3／16:9は撮影・保存解像度に維持し、通常プレビューだけを`FILL_CENTER`で中央クロップする。
+- **Proの互換性**: Proは従来どおり4:3／16:9の横長固定枠を維持し、撮影情報・設定デッキ・プロファイル領域を侵食しない。OTHERS／PANORAMAも専用操作を表示できる固定枠のままとする。
+- **操作の連続性**: レンズ選択ピルを通常プレビュー下端へ重ね、旧中央余白を廃止。単一`PreviewView`とCameraX bindは変更せず、Composeの親コンテナ制約だけを切り替える。
+- versionCode 13 / versionName 2.5.2。Xperia 1で通常↔Proの反復切替、PHOTO↔OTHERS、縦横回転を確認。29テスト、Lint、正式鍵署名Releaseが成功。
 
 ## v2.5.1 の変更点（通常プレビュー配置・高密度UI・BG録画安全化）
 
@@ -166,7 +173,7 @@ versionCode 4 / versionName 2.0.0。
 - AndroidX AppCompat の per-app locale（アプリ内言語切替）
 - LifecycleService + フォアグラウンドサービス（バックグラウンド録画）
 - compileSdk 36 / minSdk 24 / targetSdk 36。追加 API は全て SDK_INT でガード。
-- パッケージ: com.oriyu90.fcampro / applicationId 同じ / versionCode 12 / versionName 2.5.1
+- パッケージ: com.oriyu90.fcampro / applicationId 同じ / versionCode 13 / versionName 2.5.2
 
 ## 2. 実装済み機能
 

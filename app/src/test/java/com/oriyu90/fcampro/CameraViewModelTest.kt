@@ -11,19 +11,20 @@ import com.oriyu90.fcampro.camera.RawSupport
 import com.oriyu90.fcampro.camera.SlowMoFactors
 import com.oriyu90.fcampro.ui.CameraLensInfo
 import com.oriyu90.fcampro.ui.CameraLensType
+import com.oriyu90.fcampro.ui.CameraMode
 import com.oriyu90.fcampro.ui.CameraViewModel
 import com.oriyu90.fcampro.ui.ExposureComp
 import com.oriyu90.fcampro.ui.LensCapabilities
 import com.oriyu90.fcampro.ui.ManualExposure
 import com.oriyu90.fcampro.ui.ModeBarOrder
-import com.oriyu90.fcampro.ui.CameraMode
 import com.oriyu90.fcampro.ui.ProArrangement
 import com.oriyu90.fcampro.ui.ProControlPresets
 import com.oriyu90.fcampro.ui.SaveFormat
+import com.oriyu90.fcampro.ui.ZoomRatios
 import com.oriyu90.fcampro.ui.dedupeLenses
 import com.oriyu90.fcampro.ui.formatStorageGb
+import com.oriyu90.fcampro.ui.normalPhoneUsesExpandedPreview
 import com.oriyu90.fcampro.ui.proArrangement
-import com.oriyu90.fcampro.ui.ZoomRatios
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -32,6 +33,14 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class CameraViewModelTest {
+    @Test
+    fun normalPhonePreviewExpandsCaptureModesAndReservesUtilitySpace() {
+        assertTrue(normalPhoneUsesExpandedPreview(CameraMode.PHOTO))
+        assertTrue(normalPhoneUsesExpandedPreview(CameraMode.VIDEO))
+        assertTrue(normalPhoneUsesExpandedPreview(CameraMode.SLOWMO))
+        assertTrue(!normalPhoneUsesExpandedPreview(CameraMode.OTHERS))
+        assertTrue(!normalPhoneUsesExpandedPreview(CameraMode.PANORAMA))
+    }
 
     private fun vm() =
         CameraViewModel(ApplicationProvider.getApplicationContext<Application>())
