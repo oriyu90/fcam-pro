@@ -39,7 +39,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoMode
 import androidx.compose.material.icons.filled.BatteryStd
 import androidx.compose.material.icons.filled.Cameraswitch
-import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Crop169
@@ -111,16 +110,6 @@ internal fun normalPhoneUsesExpandedPreview(mode: CameraMode): Boolean =
 /** Keeps the normal landscape deck compact while preserving 48dp controls. */
 internal fun normalLandscapePanelWidth(screenWidthDp: Int): Int =
     (screenWidthDp * 0.34f).roundToInt().coerceIn(272, 292)
-
-/**
- * Tablet portrait deck width. Fixed (not weight) so the side preview can take
- * the remainder with weight(1f) and never push the deck to 0px. The previous
- * fillMaxHeight + aspectRatio preview demanded height*aspect width (e.g. 1280dp
- * * 4/3 = 1706dp on an 800dp-wide tablet), leaving negative width for the deck
- * and making the controls disappear in portrait.
- */
-internal fun normalTabletPortraitPanelWidth(screenWidthDp: Int): Int =
-    (screenWidthDp * 0.40f).roundToInt().coerceIn(300, 380)
 
 @Composable
 fun CameraOverlay(
@@ -223,22 +212,23 @@ fun CameraOverlay(
 
     // Pro (manual) mode is composed by CameraScreen (ProScreen layouts);
     // this overlay only serves the normal phone/tablet panels.
+    // Tablet portrait uses a phone-like vertical composition with a floating
+    // side shooting rail: the side-by-side Row either overflowed the deck to
+    // 0px (fixed-aspect preview) or squeezed the viewfinder into an unusable
+    // tall narrow strip under the overlapping preview surface.
     when (layout) {
         Layout.PHONE_PORTRAIT -> PhonePortrait(shared, streamAspect, previewContent)
         Layout.LARGE_PORTRAIT ->
-            NormalSideLayout(
+            TabletPortrait(
                 shared,
                 streamAspect,
-                panelOnLeft = true,
                 collapsed = panelCollapsed,
                 onSetCollapsed = onSetPanelCollapsed,
                 previewContent = previewContent,
             )
         Layout.SIDE ->
-            NormalSideLayout(
+            NormalLandscapeLayout(
                 shared,
-                streamAspect,
-                panelOnLeft = false,
                 collapsed = panelCollapsed,
                 onSetCollapsed = onSetPanelCollapsed,
                 previewContent = previewContent,
@@ -372,102 +362,204 @@ private fun PhonePortrait(
 }
 
 /**
- * Sony-style landscape/tablet composition. Both rails are width-bounded and the
- * preview takes the remainder with weight(1f) as an immersive viewfinder, so no
- * fixed-aspect sibling can overflow the Row and push the deck to 0px.
- * Collapsed mode is always immersive fillMaxSize for the same reason.
+ * Tablet portrait (≥600dp): phone-like vertical composition with a floating
+ * icon-type shooting rail on the viewfinder edge (user request). The bottom
+ * holds the toolbar (controls + lens + modes + status) and the side rail holds
+ * the shooting operations (shutter + front/back), so neither crowds the other.
+ * Collapsed mode keeps the shared CollapsedCluster contract.
  */
 @Composable
-private fun NormalSideLayout(
+private fun TabletPortrait(
     s: SharedActions,
     streamAspect: Float,
-    panelOnLeft: Boolean,
     collapsed: Boolean,
     onSetCollapsed: (Boolean) -> Unit,
     previewContent: @Composable () -> Unit,
 ) {
-    val compactLandscape = !panelOnLeft
-    val compactPanelWidth =
-        normalLandscapePanelWidth(LocalConfiguration.current.screenWidthDp).dp
-    val tabletPanelWidth =
-        normalTabletPortraitPanelWidth(LocalConfiguration.current.screenWidthDp).dp
+    if (collapsed) {
+        Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize().align(Alignment.Center)) { previewContent() }
+            CollapsedCluster(
+                s = s,
+                anchor = Alignment.CenterEnd,
+                onExpand = { onSetCollapsed(false) },
+            )
+        }
+        return
+    }
+    // Same capture/menu contract as the phone: expanded preview for capture
+    // modes, reserved menu space for utility modes.
+    val lenses = s.availableLenses.filter { it.isFront == s.settings.isFrontCamera }
+    val showCaptureOverlay = normalPhoneUsesExpandedPreview(s.settings.cameraMode)
+    Column(Modifier.fillMaxSize().background(Color.Black)) {
+        Box(
+            Modifier.fillMaxWidth()
+                .then(
+                    if (showCaptureOverlay) Modifier.weight(1f)
+                    else Modifier.aspectRatio(streamAspect)
+                )
+                .background(Color.Black),
+        ) {
+            previewContent()
+            if (showCaptureOverlay) {
+                Column(
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    if (s.zoomRatio > 1.01f) {
+                        ZoomPill(
+                            zoomRatio = s.zoomRatio,
+                            maxZoom = s.maxZoom,
+                            enabled = !s.bgRunning,
+                            onReset = s.onResetZoom,
+                        )
+                    }
+                    LensZoomPills(
+                        lenses = lenses,
+                        current = s.settings.currentLens,
+                        enabled = !s.isRecording && !s.bgRunning,
+                        onSelect = { s.viewModel.setLens(it) },
+                    )
+                }
+            }
+            TabletSideRail(s = s, modifier = Modifier.align(Alignment.CenterEnd))
+        }
+        Column(
+            modifier =
+                Modifier.fillMaxWidth()
+                    .then(if (showCaptureOverlay) Modifier else Modifier.weight(1f))
+                    .background(Color.Black)
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            ControlIcons(
+                s = s,
+                columns = 1,
+                modifier = Modifier.fillMaxWidth().background(Color.Black),
+            )
+            if (!showCaptureOverlay) {
+                Box(
+                    Modifier.fillMaxWidth().weight(1f),
+                    contentAlignment =
+                        if (s.settings.cameraMode == CameraMode.OTHERS) Alignment.TopCenter
+                        else Alignment.Center,
+                ) {
+                    Column(
+                        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        if (s.settings.cameraMode == CameraMode.PANORAMA) {
+                            PanoProgressRow(s)
+                        } else if (s.settings.cameraMode == CameraMode.OTHERS) {
+                            OthersMenu(s = s, twoPerRow = false)
+                        }
+                    }
+                }
+            }
+            IphoneModeTabs(s)
+            // Bottom status row: the shutter lives in the side rail, so this row
+            // keeps gallery access, panel collapse, and battery status balanced.
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                MediaThumbButton(s.mediaThumb, s.hasMedia, s.onOpenGallery, size = 48.dp)
+                ControlTile(onClick = { onSetCollapsed(true) }) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = stringResource(R.string.cd_panel_close),
+                        tint = Color.White,
+                    )
+                }
+                BatteryPill(s.batteryPct)
+            }
+        }
+    }
+}
 
-    @Composable
-    fun androidx.compose.foundation.layout.RowScope.Preview() {
-        // Immersive: fills all width/height left by the bounded deck.
-        // streamAspect stays as capture output setting only (ResolutionSelector),
-        // never as a layout constraint here, so portrait tablets cannot overflow.
+/**
+ * Floating icon-type shooting panel on the tablet-portrait viewfinder edge.
+ * Stateless: shutter and front/back dispatch through SharedActions exactly like
+ * the phone ShutterBar, so capture behavior is identical on every layout.
+ */
+@Composable
+private fun TabletSideRail(s: SharedActions, modifier: Modifier = Modifier) {
+    Column(
+        modifier =
+            modifier
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(12.dp)
+                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(24.dp))
+                .padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        FrontBackButton(s)
+        ShutterButton(
+            isVideo = s.isRecordMode(),
+            isRecording = s.isRecording,
+            isCapturing = s.isCapturing,
+            enabled = !s.bgRunning,
+            size = 72.dp,
+            onClick = { s.onShutter() },
+        )
+    }
+}
+
+/**
+ * Landscape composition (phone and tablet). The rail is width-bounded and
+ * non-scrolling, leaving the remainder to an immersive viewfinder.
+ * Collapsed mode is immersive fillMaxSize.
+ */
+@Composable
+private fun NormalLandscapeLayout(
+    s: SharedActions,
+    collapsed: Boolean,
+    onSetCollapsed: (Boolean) -> Unit,
+    previewContent: @Composable () -> Unit,
+) {
+    val panelWidth =
+        normalLandscapePanelWidth(LocalConfiguration.current.screenWidthDp).dp
+
+    if (collapsed) {
+        Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize().align(Alignment.Center)) { previewContent() }
+            CollapsedCluster(
+                s = s,
+                anchor = Alignment.CenterEnd,
+                onExpand = { onSetCollapsed(false) },
+            )
+        }
+        return
+    }
+    Row(Modifier.fillMaxSize().background(Color.Black)) {
         Box(
             Modifier.weight(1f).fillMaxHeight()
                 .background(Color.Black),
         ) { previewContent() }
-    }
-
-    @Composable
-    fun androidx.compose.foundation.layout.RowScope.Deck() {
-        if (compactLandscape) {
-            Column(
-                Modifier.width(compactPanelWidth).fillMaxHeight()
-                    .background(Color.Black)
-                    .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(6.dp),
-                verticalArrangement = Arrangement.SpaceBetween,
-            ) {
-                ControlIcons(
-                    s = s,
-                    columns = 4,
-                    trailing = {
-                        ControlTile(onClick = { onSetCollapsed(true) }) {
-                            Icon(
-                                Icons.Default.ChevronRight,
-                                contentDescription = stringResource(R.string.cd_panel_close),
-                                tint = Color.White,
-                            )
-                        }
-                    },
-                )
-                LandscapePanelBody(s)
-            }
-        } else {
-            Column(
-                Modifier.width(tabletPanelWidth).fillMaxHeight()
-                    .background(Color.Black)
-                    .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .verticalScroll(rememberScrollState())
-                    .padding(6.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                ControlIcons(s = s, columns = 3)
-                PanelBody(s = s, verticalTabs = false, othersTwoPerRow = true)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        Column(
+            Modifier.width(panelWidth).fillMaxHeight()
+                .background(Color.Black)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(6.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            ControlIcons(
+                s = s,
+                columns = 4,
+                trailing = {
                     ControlTile(onClick = { onSetCollapsed(true) }) {
                         Icon(
-                            Icons.Default.ChevronLeft,
+                            Icons.Default.ChevronRight,
                             contentDescription = stringResource(R.string.cd_panel_close),
                             tint = Color.White,
                         )
                     }
-                }
-            }
-        }
-    }
-
-    if (collapsed) {
-        Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-            Box(
-                Modifier.fillMaxSize().align(Alignment.Center),
-            ) { previewContent() }
-            CollapsedCluster(
-                s = s,
-                anchor = if (panelOnLeft) Alignment.CenterStart else Alignment.CenterEnd,
-                onExpand = { onSetCollapsed(false) },
+                },
             )
-        }
-    } else {
-        Row(Modifier.fillMaxSize().background(Color.Black)) {
-            if (panelOnLeft) Deck()
-            Preview()
-            if (!panelOnLeft) Deck()
+            LandscapePanelBody(s)
         }
     }
 }
@@ -699,72 +791,6 @@ private fun androidx.compose.foundation.layout.BoxScope.CollapsedCluster(
 }
 
 // ============================ PANEL BODY (shared) ============================
-
-@Composable
-private fun PanelBody(s: SharedActions, verticalTabs: Boolean, othersTwoPerRow: Boolean) {
-    // Manual mode is rendered by the dedicated pro screen (ProScreen.kt);
-    // this shared body only serves non-manual phone/tablet panels.
-    val lenses = s.availableLenses.filter { it.isFront == s.settings.isFrontCamera }
-    // Pinch-zoom state is always visible here when the lens supports zoom, so the
-    // current ratio is discoverable and one tap restores the 1.0x startup state.
-    // While the background service owns the camera the pill is shown disabled.
-    ZoomPill(
-        zoomRatio = s.zoomRatio,
-        maxZoom = s.maxZoom,
-        enabled = !s.bgRunning,
-        onReset = s.onResetZoom,
-    )
-    if (lenses.size > 1) {
-        LensRow(
-            lenses = lenses,
-            current = s.settings.currentLens,
-            enabled = !s.isRecording && !s.bgRunning,
-            onSelect = { s.viewModel.setLens(it) },
-        )
-    }
-
-    Box(Modifier.fillMaxWidth().heightIn(min = 96.dp), contentAlignment = Alignment.Center) {
-        if (s.settings.cameraMode == CameraMode.OTHERS) {
-            OthersMenu(s = s, twoPerRow = othersTwoPerRow)
-        } else if (s.settings.cameraMode == CameraMode.PANORAMA) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                PanoProgressRow(s)
-                ShutterButton(
-                    isVideo = false,
-                    isRecording = false,
-                    isCapturing = s.isCapturing,
-                    enabled = !s.bgRunning,
-                    onClick = { s.onShutter() },
-                )
-            }
-        } else {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(20.dp),
-            ) {
-                FrontBackButton(s)
-                ShutterButton(
-                    isVideo = s.isRecordMode(),
-                    isRecording = s.isRecording,
-                    isCapturing = s.isCapturing,
-                    enabled = !s.bgRunning,
-                    onClick = { s.onShutter() },
-                )
-                BatteryPill(s.batteryPct)
-            }
-        }
-    }
-
-    if (verticalTabs) ModeTabsColumn(s) else ModeTabsRow(s)
-
-    // Latest capture — bottom of the panel.
-    Row(
-        Modifier.fillMaxWidth().padding(top = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        MediaThumbButton(s.mediaThumb, s.hasMedia, s.onOpenGallery)
-    }
-}
 
 // ============================ ICONS ============================
 
@@ -1051,48 +1077,6 @@ internal fun MediaThumbButton(
     }
 }
 
-// ============================ LENS ROW ============================
-
-@Composable
-private fun LensRow(
-    lenses: List<CameraLensInfo>,
-    current: CameraLensInfo?,
-    enabled: Boolean,
-    onSelect: (CameraLensInfo) -> Unit,
-) {
-    LazyRow(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-    ) {
-        items(lenses, key = { it.id }) { lens ->
-            val selected = current?.id == lens.id
-            Box(
-                modifier =
-                    Modifier.size(48.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(
-                            if (selected) MaterialTheme.colorScheme.primary else Color.DarkGray
-                        )
-                        .border(
-                            1.dp,
-                            if (selected) Color.White else Color.White.copy(alpha = 0.22f),
-                            RoundedCornerShape(3.dp),
-                        )
-                        .clickable(enabled = enabled) { onSelect(lens) },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    lensLabel(lens.type),
-                    color =
-                        if (selected) MaterialTheme.colorScheme.onPrimary else Color.White,
-                    style = MaterialTheme.typography.labelSmall,
-                    maxLines = 1,
-                )
-            }
-        }
-    }
-}
-
 // ============================ MODE TABS ============================
 
 internal object ModeBarOrder {
@@ -1131,17 +1115,6 @@ private fun ModeTabsRow(s: SharedActions, topPadding: Dp = 12.dp) {
         items(s.modeBar, key = { it.name }) { mode ->
             DraggableModeTab(s, mode, vertical = false)
         }
-    }
-}
-
-@Composable
-private fun ModeTabsColumn(s: SharedActions) {
-    Column(
-        Modifier.fillMaxWidth().padding(top = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        s.modeBar.forEach { mode -> DraggableModeTab(s, mode, vertical = true) }
     }
 }
 
@@ -1449,18 +1422,6 @@ private fun ExternalCaptureBar(
         }
     }
 }
-
-@Composable
-private fun lensLabel(type: CameraLensType): String =
-    stringResource(
-        when (type) {
-            CameraLensType.ULTRAWIDE -> R.string.lens_ultrawide
-            CameraLensType.WIDE -> R.string.lens_wide
-            CameraLensType.TELEPHOTO -> R.string.lens_telephoto
-            CameraLensType.MACRO -> R.string.lens_macro
-            CameraLensType.FRONT -> R.string.lens_front
-        }
-    )
 
 internal enum class ProArrangement {
     PHONE_PORTRAIT,

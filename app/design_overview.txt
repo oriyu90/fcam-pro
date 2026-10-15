@@ -1,4 +1,11 @@
-# Fcam pro — 設計概要と実装状況（v2.5.4）
+# Fcam pro — 設計概要と実装状況（v2.5.5）
+
+## v2.5.5 の変更点（タブレット縦の再設計・実機検証 — 破壊的変更なし）
+
+- **縦積み＋撮影レール**: タブレット縦の左右分割（`NormalSideLayout` の `panelOnLeft` 分岐）を廃止し、スマホ系の縦積み `TabletPortrait`（全幅プレビュー＋下ツールバー）へ。プレビュー右端に `TabletSideRail`（シャッター＋前後切替のフローティング操作ばん、`SharedActions.onShutter()` へ同一振り分け）を追加。折り畳み時は全面 `fillMaxSize`＋`CollapsedCluster`（既存契約）。
+- **実機検証**: Lenovo TB710FU（sw941dp）縦で PHOTO／VIDEO（赤レールシャッター）／OTHERS（固定枠＋4項目メニュー）／折畳み・展開／モード切替／レール撮影→MediaStore保存・サムネイル更新を確認。横レールは無変更で正常。logcat に FATAL／bind失敗なし。
+- **整理**: 到達不能になった `PanelBody`（＋`LensRow`・`ModeTabsColumn`・`lensLabel`）と v2.5.4 導入の `normalTabletPortraitPanelWidth` を削除。`NormalSideLayout` は横専用 `NormalLandscapeLayout` へ単純化。スマホ・Pro・bind・Room・永続化・日英172キーは無変更。
+- versionCode 16 / versionName 2.5.5。30テスト、Lint（CameraOverlay 0件）、正式鍵署名Releaseが成功。証明書指紋は従来鍵と一致。
 
 ## v2.5.4 の変更点（タブレット縦の消失修正・狭幅レールの安定化 — 破壊的変更なし）
 
@@ -188,7 +195,7 @@ versionCode 4 / versionName 2.0.0。
 - AndroidX AppCompat の per-app locale（アプリ内言語切替）
 - LifecycleService + フォアグラウンドサービス（バックグラウンド録画）
 - compileSdk 36 / minSdk 24 / targetSdk 36。追加 API は全て SDK_INT でガード。
-- パッケージ: com.oriyu90.fcampro / applicationId 同じ / versionCode 15 / versionName 2.5.4
+- パッケージ: com.oriyu90.fcampro / applicationId 同じ / versionCode 16 / versionName 2.5.5
 
 ## 2. 実装済み機能
 

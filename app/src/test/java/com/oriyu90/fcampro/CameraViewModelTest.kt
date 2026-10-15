@@ -24,7 +24,6 @@ import com.oriyu90.fcampro.ui.ZoomRatios
 import com.oriyu90.fcampro.ui.dedupeLenses
 import com.oriyu90.fcampro.ui.formatStorageGb
 import com.oriyu90.fcampro.ui.normalLandscapePanelWidth
-import com.oriyu90.fcampro.ui.normalTabletPortraitPanelWidth
 import com.oriyu90.fcampro.ui.normalPhoneUsesExpandedPreview
 import com.oriyu90.fcampro.ui.proArrangement
 import org.junit.Assert.assertEquals
@@ -49,17 +48,6 @@ class CameraViewModelTest {
         assertEquals(272, normalLandscapePanelWidth(600))
         assertEquals(289, normalLandscapePanelWidth(850))
         assertEquals(292, normalLandscapePanelWidth(1_200))
-    }
-
-    @Test
-    fun normalTabletPortraitPanelLeavesPreviewRemainder() {
-        // Fixed deck + weight(1f) preview: deck never 0px, preview never overflows.
-        assertEquals(300, normalTabletPortraitPanelWidth(600))
-        assertEquals(320, normalTabletPortraitPanelWidth(800))
-        assertEquals(380, normalTabletPortraitPanelWidth(1_200))
-        // Remainder stays positive on smallest tablet portrait.
-        assertTrue(600 - normalTabletPortraitPanelWidth(600) >= 280)
-        assertTrue(800 - normalTabletPortraitPanelWidth(800) >= 400)
     }
 
     private fun vm() =
