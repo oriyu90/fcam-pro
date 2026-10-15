@@ -1603,8 +1603,12 @@ fun CameraScreen(
         }
 
         Box(modifier = Modifier.fillMaxSize().background(Color.Black).padding(padding)) {
-            if (proMode && !proLandscape && compact) {
-                // Portrait: toolbar, gapped preview, summary, panel.
+            // Portrait Pro (phone and tablet): toolbar, full-width preview,
+            // summary, then the live-value deck, control area, profile dock,
+            // mode tabs and shutter bar. A side-by-side tablet branch left a
+            // giant dead zone and clipped deck items, so portrait shares the
+            // proven vertical composition at any width.
+            if (proMode && !proLandscape) {
                 Column(Modifier.fillMaxSize()) {
                     ProToolbarBlock(
                         shared,
@@ -1666,47 +1670,6 @@ fun CameraScreen(
                         modifier = Modifier.fillMaxHeight().weight(1f),
                         showShutter = true,
                         showToolbar = true,
-                    )
-                }
-            } else if (proMode) {
-                // Tablet portrait: shutter just below the preview's right edge.
-                Row(Modifier.fillMaxSize()) {
-                    Column(Modifier.fillMaxHeight().weight(1.3f)) {
-                        ProToolbarBlock(
-                            shared,
-                            Modifier.fillMaxWidth()
-                                .background(Color.Black)
-                                .windowInsetsPadding(WindowInsets.safeDrawing)
-                                .padding(horizontal = 12.dp, vertical = 4.dp),
-                        )
-                        ProPreviewBox(
-                            Modifier.fillMaxWidth()
-                                .padding(horizontal = 16.dp)
-                                .aspectRatio(streamAspect)
-                                .align(Alignment.CenterHorizontally)
-                        )
-                        ProSummaryLine(shared, Modifier.align(Alignment.CenterHorizontally))
-                        Row(
-                            Modifier.fillMaxWidth()
-                                .padding(horizontal = 32.dp, vertical = 10.dp),
-                            horizontalArrangement = Arrangement.End,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            ShutterButton(
-                                isVideo = shared.isRecordMode(),
-                                isRecording = shared.isRecording,
-                                isCapturing = shared.isCapturing,
-                                enabled = !shared.bgRunning,
-                                size = 78.dp,
-                                onClick = { shared.onShutter() },
-                            )
-                        }
-                        Spacer(Modifier.weight(1f))
-                    }
-                    ProPanelColumn(
-                        modifier = Modifier.fillMaxHeight().weight(1f),
-                        showShutter = false,
-                        showToolbar = false,
                     )
                 }
             }

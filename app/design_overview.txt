@@ -1,4 +1,11 @@
-# Fcam pro — 設計概要と実装状況（v2.5.5）
+# Fcam pro — 設計概要と実装状況（v2.5.6）
+
+## v2.5.6 の変更点（タブレット縦Proの再設計・実機検証 — 破壊的変更なし）
+
+- **縦積みへ合流**: タブレット縦専用の左右分割Pro分岐を削除し、縦向きProはスマホ・タブレット共通の縦積み構成（ツールバー→全幅プレビュー→サマリー→設定デッキ→操作域→プロファイル→モード→シャッター）へ。左列下の巨大空白と右デッキの項目欠け（FMT/MICの画面外切断）を解消。タブレット幅では全6〜7項目が1行に収まる
+- **実機検証**: Lenovo TB710FU縦で全デッキ項目表示・ISO選択→プリセット・プロファイル・撮影保存・サムネイル更新、横Pro（無変更）・通常縦（回帰なし）を確認。logcatにFATAL／bind失敗なし
+- スマホ縦Proの画素は同一分岐のため一字一句無変更。横Pro・通常配置・bind・Room・永続化・日英172キーは無変更
+- versionCode 17 / versionName 2.5.6。30テスト、Lint（CameraScreen新規0件＝既存UseKtx警告のみ）、正式鍵署名Releaseが成功。証明書指紋は従来鍵と一致。
 
 ## v2.5.5 の変更点（タブレット縦の再設計・実機検証 — 破壊的変更なし）
 
@@ -195,7 +202,7 @@ versionCode 4 / versionName 2.0.0。
 - AndroidX AppCompat の per-app locale（アプリ内言語切替）
 - LifecycleService + フォアグラウンドサービス（バックグラウンド録画）
 - compileSdk 36 / minSdk 24 / targetSdk 36。追加 API は全て SDK_INT でガード。
-- パッケージ: com.oriyu90.fcampro / applicationId 同じ / versionCode 16 / versionName 2.5.5
+- パッケージ: com.oriyu90.fcampro / applicationId 同じ / versionCode 17 / versionName 2.5.6
 
 ## 2. 実装済み機能
 
