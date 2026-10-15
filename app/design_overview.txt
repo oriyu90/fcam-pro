@@ -1,4 +1,11 @@
-# Fcam pro — 設計概要と実装状況（v2.5.3）
+# Fcam pro — 設計概要と実装状況（v2.5.4）
+
+## v2.5.4 の変更点（タブレット縦の消失修正・狭幅レールの安定化 — 破壊的変更なし）
+
+- **タブレット縦の所有関係**: `LARGE_PORTRAIT` の `fillMaxHeight＋aspectRatio(matchHeightConstraintsFirst)` を廃止。左デッキを `normalTabletPortraitPanelWidth`（画面幅40%基準・300〜380dp）で固定し、プレビューは `weight(1f)` の没入 `fillMaxSize`（`FILL_CENTER`）へ。800×1280dpで1706dp超を要求してデッキを0pxに潰していた消失を解消。折り畳み時も両レール全面表示。
+- **狭幅の不安定さ**: スマホ縦の7連操作・横レールの最大5モード・1行その他（日本語最大4件）・5レンズ超のピルを横スクロール化し、48dpを保ったまま欠けを解消。モードタブはスマホと同じ `LazyRow＋DraggableModeTab` 契約へ統一。Pro配置・bind・Room・永続化・日英172キーは無変更。
+- **参照スキル**: `android/skills`（adaptive / camerax / edge-to-edge / jetpack-compose-performance）を `/Users/yuki/適当フォルダ/android-skills` へDLして精査。単一 `PreviewView`＋`movableContentOf`、出力アスペクトは `ResolutionSelector` のみ、デッキのみ `safeDrawing` の単一適用。
+- versionCode 15 / versionName 2.5.4。31テスト、Lint（CameraOverlay 0件）、正式鍵署名Releaseが成功。証明書指紋は従来鍵と一致。
 
 ## v2.5.3 の変更点（通常横画面の高密度レール・全面プレビュー）
 
@@ -181,7 +188,7 @@ versionCode 4 / versionName 2.0.0。
 - AndroidX AppCompat の per-app locale（アプリ内言語切替）
 - LifecycleService + フォアグラウンドサービス（バックグラウンド録画）
 - compileSdk 36 / minSdk 24 / targetSdk 36。追加 API は全て SDK_INT でガード。
-- パッケージ: com.oriyu90.fcampro / applicationId 同じ / versionCode 14 / versionName 2.5.3
+- パッケージ: com.oriyu90.fcampro / applicationId 同じ / versionCode 15 / versionName 2.5.4
 
 ## 2. 実装済み機能
 

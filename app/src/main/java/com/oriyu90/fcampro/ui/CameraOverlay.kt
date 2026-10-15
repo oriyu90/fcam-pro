@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -110,6 +111,16 @@ internal fun normalPhoneUsesExpandedPreview(mode: CameraMode): Boolean =
 /** Keeps the normal landscape deck compact while preserving 48dp controls. */
 internal fun normalLandscapePanelWidth(screenWidthDp: Int): Int =
     (screenWidthDp * 0.34f).roundToInt().coerceIn(272, 292)
+
+/**
+ * Tablet portrait deck width. Fixed (not weight) so the side preview can take
+ * the remainder with weight(1f) and never push the deck to 0px. The previous
+ * fillMaxHeight + aspectRatio preview demanded height*aspect width (e.g. 1280dp
+ * * 4/3 = 1706dp on an 800dp-wide tablet), leaving negative width for the deck
+ * and making the controls disappear in portrait.
+ */
+internal fun normalTabletPortraitPanelWidth(screenWidthDp: Int): Int =
+    (screenWidthDp * 0.40f).roundToInt().coerceIn(300, 380)
 
 @Composable
 fun CameraOverlay(
@@ -361,9 +372,10 @@ private fun PhonePortrait(
 }
 
 /**
- * Sony-style landscape/tablet composition. The normal landscape rail is width-
- * bounded and non-scrolling, leaving the remainder to an immersive viewfinder.
- * Large portrait keeps the exact-aspect sibling layout used before v2.5.3.
+ * Sony-style landscape/tablet composition. Both rails are width-bounded and the
+ * preview takes the remainder with weight(1f) as an immersive viewfinder, so no
+ * fixed-aspect sibling can overflow the Row and push the deck to 0px.
+ * Collapsed mode is always immersive fillMaxSize for the same reason.
  */
 @Composable
 private fun NormalSideLayout(
@@ -377,16 +389,16 @@ private fun NormalSideLayout(
     val compactLandscape = !panelOnLeft
     val compactPanelWidth =
         normalLandscapePanelWidth(LocalConfiguration.current.screenWidthDp).dp
+    val tabletPanelWidth =
+        normalTabletPortraitPanelWidth(LocalConfiguration.current.screenWidthDp).dp
 
     @Composable
     fun androidx.compose.foundation.layout.RowScope.Preview() {
+        // Immersive: fills all width/height left by the bounded deck.
+        // streamAspect stays as capture output setting only (ResolutionSelector),
+        // never as a layout constraint here, so portrait tablets cannot overflow.
         Box(
-            (if (compactLandscape) {
-                Modifier.weight(1f).fillMaxHeight()
-            } else {
-                Modifier.fillMaxHeight()
-                    .aspectRatio(streamAspect, matchHeightConstraintsFirst = true)
-            })
+            Modifier.weight(1f).fillMaxHeight()
                 .background(Color.Black),
         ) { previewContent() }
     }
@@ -397,6 +409,7 @@ private fun NormalSideLayout(
             Column(
                 Modifier.width(compactPanelWidth).fillMaxHeight()
                     .background(Color.Black)
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
                     .padding(6.dp),
                 verticalArrangement = Arrangement.SpaceBetween,
             ) {
@@ -417,8 +430,9 @@ private fun NormalSideLayout(
             }
         } else {
             Column(
-                Modifier.weight(1f).fillMaxHeight()
+                Modifier.width(tabletPanelWidth).fillMaxHeight()
                     .background(Color.Black)
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
                     .verticalScroll(rememberScrollState())
                     .padding(6.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -441,12 +455,7 @@ private fun NormalSideLayout(
     if (collapsed) {
         Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
             Box(
-                (if (compactLandscape) {
-                    Modifier.fillMaxSize()
-                } else {
-                    Modifier.fillMaxHeight()
-                        .aspectRatio(streamAspect, matchHeightConstraintsFirst = true)
-                }).align(Alignment.Center),
+                Modifier.fillMaxSize().align(Alignment.Center),
             ) { previewContent() }
             CollapsedCluster(
                 s = s,
@@ -539,8 +548,9 @@ private fun LensZoomPills(
     val base =
         lenses.firstOrNull { it.type == CameraLensType.WIDE }?.focalLength
             ?: lenses.minOf { it.focalLength }
+    // Narrow rails (272dp) hold at most ~5 pills; scroll instead of clipping.
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -895,9 +905,12 @@ internal fun ControlIcons(
     }
 
     if (columns <= 1) {
+        // 360dp phones hold ~7 tiles (7*48+6*4=360dp) before padding; scroll
+        // instead of clipping the settings tile on narrower screens.
         Row(
             modifier =
-                if (modifier == Modifier) Modifier.fillMaxWidth() else modifier,
+                (if (modifier == Modifier) Modifier.fillMaxWidth() else modifier)
+                    .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -1108,11 +1121,16 @@ internal object ModeBarOrder {
 
 @Composable
 private fun ModeTabsRow(s: SharedActions, topPadding: Dp = 12.dp) {
-    Row(
-        Modifier.fillMaxWidth().padding(top = topPadding),
-        horizontalArrangement = Arrangement.SpaceEvenly,
+    // 272dp rail holds 3 tabs (3*64=192dp); 5 tabs need ~320dp+, so scroll
+    // instead of clipping. Same drag contract as the phone LazyRow.
+    LazyRow(
+        modifier = Modifier.fillMaxWidth().padding(top = topPadding),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        s.modeBar.forEach { mode -> DraggableModeTab(s, mode, vertical = false) }
+        items(s.modeBar, key = { it.name }) { mode ->
+            DraggableModeTab(s, mode, vertical = false)
+        }
     }
 }
 
@@ -1259,9 +1277,11 @@ private fun OthersMenu(
             overflow = TextOverflow.Ellipsis,
         )
         if (compactRow) {
+            // 272dp rail with 4 Japanese labels overflows SpaceEvenly; keep
+            // one row but allow sideways scroll instead of clipping.
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.Top,
             ) {
                 items.forEach { it() }
